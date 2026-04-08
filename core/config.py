@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     # Scanning
     WATCH_SYMBOLS: str = "BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT"
     SCAN_INTERVAL_MINUTES: int = 15
+    FIB_TOLERANCE: float = 0.015 # 1.5% sensitivity
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

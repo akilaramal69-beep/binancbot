@@ -28,12 +28,18 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
             f"Price: {price}"
         )
         
-        # 1. Fundamental Analysis (Sentiment)
+        # 1. Fundamental Analysis (Weighted Sentiment)
         ai_sentiment = await SentimentAnalysis.get_news_sentiment(symbol)
         av_sentiment = await AlphaVantageService.get_news_sentiment(symbol)
         
-        sentiment_score = (ai_sentiment + av_sentiment) / 2
-        logger.info(f"Sentiment - AI: {ai_sentiment}, AV: {av_sentiment}, Combined: {sentiment_score}")
+        # Weighted Logic: 80% AI, 20% Alpha Vantage. 
+        # If AV is missing/0, use 100% AI.
+        if av_sentiment == 0:
+            sentiment_score = ai_sentiment
+        else:
+            sentiment_score = (ai_sentiment * 0.8) + (av_sentiment * 0.2)
+            
+        logger.info(f"Sentiment - AI: {ai_sentiment}, AV: {av_sentiment}, Weighted: {sentiment_score:.2f}")
 
         # 2. Technical Analysis (Fibonacci)
         # Handle exceptions internally to not break the main loop
@@ -47,7 +53,11 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
                 actual_high = max(highs)
                 actual_low = min(lows)
                 fib_levels = TechnicalAnalysis.calculate_fibonacci_levels(actual_high, actual_low)
-                fib_level_hit = TechnicalAnalysis.is_price_at_fib_level(price, fib_levels)
+                
+                # Use configurable tolerance for better sensitivity
+                fib_level_hit = TechnicalAnalysis.is_price_at_fib_level(
+                    price, fib_levels, tolerance=settings.FIB_TOLERANCE
+                )
                 
                 # Calculate EMA locally from Binance highs/lows or close prices
                 # For simplicity, we'll use the 'high' prices we already have
