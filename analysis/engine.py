@@ -73,14 +73,24 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
         # We now use the local ema_20 calculated above
         pass
 
-        # 3. Decision Logic
+        # 3. Decision Logic (Aggressive & Breakout)
         should_trade = False
-        side = "buy" # Proactive scanner always looks for buy entries
+        side = "buy" 
         
-        if sentiment_score > 0.2 and fib_level_hit in ["level_618", "level_500", "level_786"]:
+        # Standard Retracement Levels (Including shallow ones for aggressive trading)
+        buy_levels = ["level_236", "level_382", "level_500", "level_618", "level_786"]
+        
+        # Check for Retracement
+        if sentiment_score > 0.2 and fib_level_hit in buy_levels:
             if ema_20 == 0 or price > ema_20:
                 should_trade = True
-                logger.info(f"Trade Criteria Met for {symbol}")
+                logger.info(f"Aggressive Entry Match: {symbol} at {fib_level_hit}")
+
+        # Check for Breakout (Sentiment must be very high)
+        if not should_trade and sentiment_score >= settings.SENTIMENT_BREAKOUT_THRESHOLD:
+            if fib_level_hit == "level_0":
+                should_trade = True
+                logger.info(f"Breakout Triggered: {symbol} at level_0 with sentiment {sentiment_score}")
 
         if should_trade:
             summary_msg = f"✅ <b>Independent Trade Triggered</b> for {symbol}\n" \

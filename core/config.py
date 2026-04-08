@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     WATCH_SYMBOLS: str = "BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT"
     SCAN_INTERVAL_MINUTES: int = 15
     FIB_TOLERANCE: float = 0.015 # 1.5% sensitivity
+    SENTIMENT_BREAKOUT_THRESHOLD: float = 0.8
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
