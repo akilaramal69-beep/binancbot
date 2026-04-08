@@ -159,17 +159,34 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
             c_open, c_high, c_low, c_close = current_candle[1:5]
             
             candle_size = c_high - c_low
+            candle_body = abs(c_close - c_open)
             
-            # Check if closes near high (top 20% of candle) to avoid 'Darth Maul' wicks
+            # Strict Quality Filters
             closes_near_high = False
+            strong_candle = False
+            valid_break_direction = False
+            
             if candle_size > 0:
+                # 1. Close must be near the high to prevent massive upper wicks
                 closes_near_high = (c_close - c_low) / candle_size >= 0.8
+                # 2. Buyers must control the candle heavily (Big Body)
+                body_ratio = candle_body / candle_size
+                strong_candle = body_ratio >= 0.6
+                
+            # 3. Ensure we aren't just bouncing inside market noise (Breakout Direction)
+            if len(highs) > 5:
+                recent_range_high = max(highs[-6:-1]) # Exclude current candle
+                if c_close > recent_range_high:
+                    # FOMO Filter: Prevent chasing candles that have already run too far
+                    distance_from_range = (c_close - recent_range_high) / atr if atr > 0 else 0
+                    if distance_from_range <= 0.5:
+                        valid_break_direction = True
                 
             # Combine Volatility (ATR) and Structure
-            if candle_size > (1.5 * atr) and closes_near_high:
+            if candle_size > (1.5 * atr) and closes_near_high and strong_candle and valid_break_direction:
                 explosive_move = True
 
-        # Core Entry Trigger
+        # Core Entry Triggers
         if score >= 7:
             should_trade = True
             logger.info(f"🔥 SCORE ENTRY TRIGGERED: {symbol} at Score {score} (Jump: {score_jump})!")
@@ -179,6 +196,13 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
                 logger.info(f"🚀 EXPLOSIVE ACCELERATION TRIGGERED: {symbol} Score {score} (Jump: {score_jump}) + Solid Strong Candle!")
             else:
                 logger.info(f"⚠️ Acceleration Detected but weak candle structure/wicking for {symbol}. Waiting for confirmation.")
+        elif score_jump >= 3 and volume_spike and not bos:
+            # Pre-BOS Expansion (Early Ignition)
+            if explosive_move:
+                should_trade = True
+                logger.info(f"💥 PRE-BOS IGNITION TRIGGERED: {symbol} Score {score} (Jump: {score_jump}) + Vol Spike + ATR Expansion!")
+            else:
+                logger.info(f"⏱️ Early expansion probed for {symbol}, but candle structure insufficient.")
 
         # 4. Cache Analysis for WebUI
         try:
