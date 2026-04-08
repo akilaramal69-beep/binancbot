@@ -6,6 +6,8 @@ from services.telegram import TelegramService
 from services.alpha_vantage import AlphaVantageService
 from core.config import settings
 import logging
+import os
+import json
 
 logger = logging.getLogger("uvicorn")
 
