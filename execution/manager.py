@@ -34,7 +34,10 @@ class RiskManager:
             "side": side,
             "highest_price": entry_price,
             "tp_price": final_tp,
-            "sl_price": entry_price * 0.98
+            "sl_price": entry_price * 0.98,
+            "original_sl": entry_price * 0.98,
+            "breakeven": False,
+            "scaled_out": False
         }
         with open(POSITIONS_FILE, "w") as f:
             json.dump(positions, f, indent=4)

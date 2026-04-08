@@ -62,9 +62,9 @@ class MarketScanner:
 
                 # Level 1: Breakeven (50% to target)
                 if target_distance > 0 and current_price >= level1 and not updated_pos.get("breakeven"):
-                    new_sl = max(sl_price, entry_price) # Move Stop Loss to Entry
+                    new_sl = max(sl_price, entry_price * 1.002) # Move Stop Loss to Entry + 0.2% to cover Binance fees
                     RiskManager.update_position_data(symbol, {"breakeven": True, "sl_price": new_sl})
-                    await TelegramService.send_message(f"🛡️ <b>Breakeven Activated</b> for {symbol}\nPrice reached 50% of target. Stop Loss secured at ${new_sl:.2f}.")
+                    await TelegramService.send_message(f"🛡️ <b>True Breakeven Activated</b> for {symbol}\nPrice reached 50% of target. Stop Loss secured at ${new_sl:.2f} (Covers Fees).")
 
                 # Level 2: Scale Out (90% to target)
                 if target_distance > 0 and current_price >= level2 and not updated_pos.get("scaled_out"):
