@@ -56,36 +56,43 @@ async function updateDashboard() {
             });
         }
 
-        // 4. Update AI Analysis Feed
+        // 4. Update AI Analysis Feed and Sentiment
         const analysisResponse = await fetch('/analysis');
         const analysisData = await analysisResponse.json();
-        const feed = document.getElementById('analysis-feed');
         
+        let avgSentiment = 0;
+        let count = 0;
         if (Object.keys(analysisData).length > 0) {
-            feed.innerHTML = '';
-            let avgSentiment = 0;
-            let count = 0;
-            
-            for (const [symbol, data] of Object.entries(analysisData)) {
+            for (const data of Object.values(analysisData)) {
                 avgSentiment += data.sentiment;
                 count++;
-                
+            }
+            if (count > 0) {
+                document.getElementById('latest-sentiment').innerText = (avgSentiment / count).toFixed(2);
+            }
+        }
+
+        const historyResponse = await fetch('/analysis_history');
+        const feedHistory = await historyResponse.json();
+        const feed = document.getElementById('analysis-feed');
+        
+        if (feedHistory.length > 0) {
+            feed.innerHTML = '';
+            // Display newest at the top
+            const reversedFeed = [...feedHistory].reverse();
+            reversedFeed.forEach(data => {
                 const signalClass = data.signal === "BUY" ? "positive" : "text-secondary";
                 feed.innerHTML += `
                     <div style="margin-bottom: 0.75rem; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 0.5rem;">
                         <span class="symbol" style="color: var(--accent-color)">[${data.timestamp}]</span> 
-                        <span style="font-weight: 800">${symbol}:</span> 
+                        <span style="font-weight: 800">${data.symbol}:</span> 
                         Price <span style="color:white">$${data.price.toLocaleString()}</span> | 
                         Sentiment <span class="positive">${data.sentiment.toFixed(2)}</span> | 
                         Fib <span style="color:#e1e1e1">${data.fib_level || 'None'}</span> | 
                         Signal: <span class="${signalClass}" style="font-weight:bold">${data.signal}</span>
                     </div>
                 `;
-            }
-            
-            if (count > 0) {
-                document.getElementById('latest-sentiment').innerText = (avgSentiment / count).toFixed(2);
-            }
+            });
         }
 
     } catch (error) {

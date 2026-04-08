@@ -39,6 +39,14 @@ async def get_analysis():
             return json.load(f)
     return {}
 
+@router.get("/analysis_history")
+async def get_analysis_history():
+    history_file = "analysis_history.json"
+    if os.path.exists(history_file):
+        with open(history_file, "r") as f:
+            return json.load(f)
+    return []
+
 @router.get("/stats")
 async def get_stats():
     positions = RiskManager.load_positions()

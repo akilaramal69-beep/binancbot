@@ -134,16 +134,37 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
                 with open(cache_file, "r") as f:
                     cache = json.load(f)
             
-            cache[symbol] = {
+            timestamp_str = str(logging.Formatter().formatTime(logging.LogRecord("", 0, "", 0, "", (), None)))
+            
+            cache_data = {
                 "price": price,
                 "sentiment": sentiment_score,
                 "fib_level": fib_level_hit,
                 "ema": ema_20,
-                "timestamp": str(logging.Formatter().formatTime(logging.LogRecord("", 0, "", 0, "", (), None))),
+                "timestamp": timestamp_str,
                 "signal": "BUY" if should_trade else "WATCH"
             }
+            cache[symbol] = cache_data
             with open(cache_file, "w") as f:
                 json.dump(cache, f, indent=4)
+                
+            # Keep a rolling history of the last 50 scans
+            history_file = "analysis_history.json"
+            history_list = []
+            if os.path.exists(history_file):
+                with open(history_file, "r") as f:
+                    history_list = json.load(f)
+            
+            history_entry = cache_data.copy()
+            history_entry["symbol"] = symbol
+            history_list.append(history_entry)
+            
+            if len(history_list) > 50:
+                history_list = history_list[-50:]
+                
+            with open(history_file, "w") as f:
+                json.dump(history_list, f, indent=4)
+                
         except Exception as e:
             logger.warning(f"Failed to cache analysis for {symbol}: {e}")
 
