@@ -41,3 +41,15 @@ class TechnicalAnalysis:
         rs = gain / loss
         rsi = 100 - (100 / (1 + rs))
         return rsi.iloc[-1]
+
+    @staticmethod
+    def calculate_ema(prices: list, period: int = 20) -> float:
+        """
+        Calculates Exponential Moving Average (EMA).
+        """
+        if len(prices) < period:
+            return 0.0
+        
+        df = pd.DataFrame(prices, columns=['price'])
+        ema = df['price'].ewm(span=period, adjust=False).mean()
+        return float(ema.iloc[-1])

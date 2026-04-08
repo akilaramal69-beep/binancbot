@@ -69,7 +69,10 @@ class SentimentAnalysis:
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(url, json=payload, headers=headers)
-                response.raise_for_status()
+                if response.status_code != 200:
+                    logger.error(f"Groq API Error: Status {response.status_code}, Response: {response.text}")
+                    return 0.0
+                
                 data = response.json()
                 content = data["choices"][0]["message"]["content"].strip()
                 

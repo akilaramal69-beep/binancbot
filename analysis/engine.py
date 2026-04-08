@@ -48,22 +48,27 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
                 actual_low = min(lows)
                 fib_levels = TechnicalAnalysis.calculate_fibonacci_levels(actual_high, actual_low)
                 fib_level_hit = TechnicalAnalysis.is_price_at_fib_level(price, fib_levels)
-                logger.info(f"Fib Level Hit: {fib_level_hit}")
+                
+                # Calculate EMA locally from Binance highs/lows or close prices
+                # For simplicity, we'll use the 'high' prices we already have
+                ema_20 = TechnicalAnalysis.calculate_ema(highs, period=20)
+                
+                logger.info(f"Fib Level Hit: {fib_level_hit}, Local EMA: {ema_20}")
             else:
                 logger.warning(f"Failed to fetch OHLCV for {symbol}")
         except Exception as e:
             logger.error(f"Error in Fibonacci analysis: {e}")
 
-        # 2.5 Alpha Vantage Technical Verification (EMA)
-        av_ema = await AlphaVantageService.get_ema(symbol)
-        logger.info(f"Alpha Vantage EMA: {av_ema}")
+        # 2.5 Alpha Vantage Technical Verification (REMOVED to save credits)
+        # We now use the local ema_20 calculated above
+        pass
 
         # 3. Decision Logic
         should_trade = False
         side = "buy" # Proactive scanner always looks for buy entries
         
         if sentiment_score > 0.2 and fib_level_hit in ["level_618", "level_500", "level_786"]:
-            if av_ema == 0 or price > av_ema:
+            if ema_20 == 0 or price > ema_20:
                 should_trade = True
                 logger.info(f"Trade Criteria Met for {symbol}")
 
