@@ -51,6 +51,7 @@ class MarketScanner:
                 RiskManager.update_trailing_stop(symbol, current_price)
                 
                 # Fetch updated data to check TP/SL
+                updated_pos = RiskManager.load_positions().get(symbol, pos)
                 sl_price = updated_pos["sl_price"]
                 tp_price = updated_pos["tp_price"]
                 entry_price = updated_pos["entry_price"]
