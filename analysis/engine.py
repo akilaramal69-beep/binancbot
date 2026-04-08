@@ -93,6 +93,8 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
             logger.warning(f"Market Regime check failed for {symbol}: {e}")
 
         # 3. Decision Logic (Aggressive & Breakout)
+        should_trade = False
+        side = "buy" 
         
         # Standard Retracement Levels
         buy_levels = ["level_236", "level_382", "level_500", "level_618", "level_786"]
