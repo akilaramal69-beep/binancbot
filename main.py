@@ -4,6 +4,7 @@ from services.scanner import MarketScanner
 import uvicorn
 import asyncio
 import os
+from contextlib import asynccontextmanager
 from services.telegram import TelegramService
 
 @asynccontextmanager
