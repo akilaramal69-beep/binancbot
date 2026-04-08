@@ -64,9 +64,15 @@ class RiskManager:
         positions = RiskManager.load_positions()
         if symbol in positions:
             closed_pos = positions[symbol]
+            closed_pos["symbol"] = symbol
             closed_pos["exit_price"] = exit_price
             closed_pos["exit_reason"] = reason
             closed_pos["closed_at"] = str(logging.Formatter().formatTime(logging.LogRecord("", 0, "", 0, "", (), None)))
+            
+            pnl = (exit_price - closed_pos["entry_price"]) * closed_pos["amount"]
+            if closed_pos["side"] == "sell":
+                pnl = -pnl
+            closed_pos["pnl"] = pnl
             
             # Save to History
             RiskManager.archive_to_history(closed_pos)

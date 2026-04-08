@@ -42,6 +42,7 @@ ENABLE_TELEGRAM=true
 
 WATCH_SYMBOLS=BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT
 SCAN_INTERVAL_MINUTES=15
+FAST_TRADE_MODE=false # Set to true to lower AI threshold for active scalping
 ```
 
 ### 2. Live Dependencies

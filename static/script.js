@@ -51,7 +51,7 @@ async function updateDashboard() {
         // 3. Render History
         const histTable = document.getElementById('history-table-body');
         if (history.length === 0) {
-            histTable.innerHTML = '<tr><td colspan="5" class="empty-state">No historical data yet. Waiting for exits...</td></tr>';
+            histTable.innerHTML = '<tr><td colspan="6" class="empty-state">No historical data yet. Waiting for exits...</td></tr>';
         } else {
             histTable.innerHTML = '';
             // We want the most recent trades at the top
@@ -59,9 +59,10 @@ async function updateDashboard() {
             reversedHistory.forEach(trade => {
                 histTable.innerHTML += `
                     <tr>
-                        <td class="symbol">${trade.symbol}</td>
+                        <td class="symbol">${trade.symbol || 'Unknown'}</td>
                         <td>$${trade.entry_price.toLocaleString()}</td>
                         <td>$${trade.exit_price.toLocaleString()}</td>
+                        <td class="${trade.pnl >= 0 ? 'positive' : 'negative'}">${trade.pnl >= 0 ? '+' : ''}$${trade.pnl !== undefined ? Math.abs(trade.pnl).toFixed(2) : '0.00'}</td>
                         <td><span class="badge" style="background: rgba(88, 166, 255, 0.1); color: #58a6ff; border: none;">${trade.exit_reason}</span></td>
                         <td style="color: var(--text-secondary); font-size: 0.875rem;">${trade.closed_at}</td>
                     </tr>
