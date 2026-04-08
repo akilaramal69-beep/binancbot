@@ -19,14 +19,14 @@ class RiskManager:
         return size
 
     @staticmethod
-    def save_position(symbol: str, entry_price: float, amount: float, side: str, tp_price: float = None):
+    def save_position(symbol: str, entry_price: float, amount: float, side: str, tp_price: float = None, sl_price: float = None):
         """
         Persists an open position with TP and Trailing SL.
         """
         positions = RiskManager.load_positions()
         
-        # Default TP if not provided (5%)
         final_tp = tp_price if tp_price else entry_price * 1.05
+        final_sl = sl_price if sl_price else entry_price * 0.98
         
         positions[symbol] = {
             "entry_price": entry_price,
@@ -34,8 +34,8 @@ class RiskManager:
             "side": side,
             "highest_price": entry_price,
             "tp_price": final_tp,
-            "sl_price": entry_price * 0.98,
-            "original_sl": entry_price * 0.98,
+            "sl_price": final_sl,
+            "original_sl": final_sl,
             "breakeven": False,
             "scaled_out": False
         }

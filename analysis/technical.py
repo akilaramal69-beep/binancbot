@@ -65,3 +65,34 @@ class TechnicalAnalysis:
         df = pd.DataFrame(prices, columns=['price'])
         ema = df['price'].ewm(span=period, adjust=False).mean()
         return float(ema.iloc[-1])
+
+    @staticmethod
+    def calculate_atr(highs: list, lows: list, closes: list, period: int = 14) -> float:
+        """ Calculates Average True Range (ATR) for volatility measurement. """
+        if len(highs) < period: return 0.0
+        df = pd.DataFrame({'high': highs, 'low': lows, 'close': closes})
+        df['tr1'] = df['high'] - df['low']
+        df['tr2'] = abs(df['high'] - df['close'].shift())
+        df['tr3'] = abs(df['low'] - df['close'].shift())
+        df['tr'] = df[['tr1', 'tr2', 'tr3']].max(axis=1)
+        atr = df['tr'].rolling(window=period).mean()
+        return float(atr.iloc[-1])
+
+    @staticmethod
+    def is_volume_spike(volumes: list, period: int = 20, multiplier: float = 1.5) -> bool:
+        """ Confirms if current volume is significantly higher than moving average. """
+        if len(volumes) < period: return False
+        df = pd.DataFrame({'volume': volumes})
+        # Use period-1 for SMA so current spike doesn't heavily distort average
+        sma = df['volume'].rolling(window=period-1).mean().iloc[-2] 
+        current_vol = df['volume'].iloc[-1]
+        return current_vol > (sma * multiplier)
+
+    @staticmethod
+    def detect_bos(highs: list, lows: list, current_price: float) -> bool:
+        """ Detects basic short-term Bullish Break of Structure. """
+        if len(highs) < 10: return False
+        recent_high = max(highs[-10:-1]) # Exclude current forming candle
+        if current_price > recent_high:
+            return True
+        return False

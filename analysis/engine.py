@@ -94,37 +94,62 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
         except Exception as e:
             logger.warning(f"Market Regime check failed for {symbol}: {e}")
 
-        # 3. Decision Logic (Aggressive & Breakout)
+        # 3. Decision Logic - Institutional Scoring Matrix (0-10 Points)
+        score = 0
         should_trade = False
         side = "buy" 
         
-        # Standard Retracement Levels
-        buy_levels = ["level_236", "level_382", "level_500", "level_618", "level_786"]
+        # Pull historical sentiment for dynamic acceleration
+        prev_sentiment = 0
+        cache_file = "latest_analysis.json"
         
-        # EMA Precision Check (Tolerance Band: 0.2%)
+        try:
+            if os.path.exists(cache_file):
+                with open(cache_file, "r") as f:
+                    cache_data = json.load(f)
+                    prev_sentiment = cache_data.get(symbol, {}).get("sentiment", sentiment_score)
+        except:
+            pass
+
+        # Calculate Advanced Indicators
+        atr = 0.0
+        volume_spike = False
+        bos = False
+        if ohlcv:
+            closes = [candle[4] for candle in ohlcv]
+            volumes = [candle[5] for candle in ohlcv]
+            atr = TechnicalAnalysis.calculate_atr(highs, lows, closes)
+            volume_spike = TechnicalAnalysis.is_volume_spike(volumes)
+            bos = TechnicalAnalysis.detect_bos(highs, lows, price)
+            
         ema_match = False
-        if ema_20 > 0:
-            if abs(price - ema_20) / ema_20 < 0.002: # 0.2% tolerance
-                ema_match = True
-                logger.info(f"EMA Trend Match (Within Tolerance) for {symbol}")
+        if ema_20 > 0 and abs(price - ema_20) / ema_20 < 0.002: ema_match = True
 
-        # Check for Retracement
-        if sentiment_score >= settings.SENTIMENT_ENTRY_THRESHOLD and (fib_level_hit in buy_levels or ema_match):
-            if ema_20 == 0 or price >= ema_20 or ema_match:
-                should_trade = True
-                logger.info(f"Entry Match: {symbol} at {fib_level_hit or 'EMA'}")
+        # SCORING - TREND & STRUCTURE (Max 3)
+        if ema_20 > 0 and price > ema_20: score += 1
+        if bos: score += 1
+        if ema_20 > 0 and (price / ema_20) >= (1 + settings.MOMENTUM_EMA_GAP): score += 1
 
-        # Check for Breakout (Sentiment must be very high)
-        if not should_trade and sentiment_score >= settings.SENTIMENT_BREAKOUT_THRESHOLD:
-            if fib_level_hit == "level_0":
-                should_trade = True
-                logger.info(f"Breakout Triggered: {symbol} at level_0 with sentiment {sentiment_score}")
+        # SCORING - FIBONACCI (Max 3)
+        if fib_level_hit:
+            score += 1
+            if fib_level_hit in ["level_500", "level_618"]: score += 2 # Golden Zone
+        elif ema_match:
+            score += 2 # High confluence standard
 
-        # Check for Momentum (Buying the strength in a grinder)
-        if not should_trade and sentiment_score >= settings.MOMENTUM_SENTIMENT_THRESHOLD:
-            if ema_20 > 0 and (price / ema_20) >= (1 + settings.MOMENTUM_EMA_GAP):
-                should_trade = True
-                logger.info(f"Momentum Entry Triggered: {symbol} (High sentiment + EMA Gap)")
+        # SCORING - SENTIMENT (Max 3)
+        if sentiment_score >= 0.70: score += 1
+        if sentiment_score >= 0.85: score += 1
+        if sentiment_score - prev_sentiment >= 0.10: score += 1 # Acceleration
+
+        # SCORING - VOLUME (Max 1)
+        if volume_spike: score += 1
+        
+        logger.info(f"Institutional Trade Score {symbol}: {score}/10 | ATR: {atr:.4f} | Vol-Spike: {volume_spike} | BOS: {bos}")
+
+        if score >= 7:
+            should_trade = True
+            logger.info(f"🔥 SCORE ENTRY TRIGGERED: {symbol} at Score {score}!")
 
         # 4. Cache Analysis for WebUI
         try:
@@ -142,7 +167,7 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
                 "fib_level": fib_level_hit,
                 "ema": ema_20,
                 "timestamp": timestamp_str,
-                "signal": "BUY" if should_trade else "WATCH"
+                "signal": f"BUY ({score}/10)" if should_trade else f"WATCH ({score}/10)"
             }
             cache[symbol] = cache_data
             with open(cache_file, "w") as f:
@@ -197,12 +222,18 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
                 await executor.place_order(symbol, side, position_size/price)
                 logger.info(f"EXECUTING LIVE TRADE: {side} {symbol} size: {position_size}")
                 
-                # Calculate Fibonacci Extensions for Take-Profit
-                extensions = TechnicalAnalysis.calculate_fibonacci_extensions(actual_high, actual_low)
-                tp_price = extensions["level_1272"]
-                
+                # Calculate ATR-Based TP/SL if available
+                if atr > 0:
+                    tp_price = price + (3.0 * atr)
+                    sl_price = price - (1.5 * atr)
+                    logger.info(f"Risk Params using ATR Volatility -> SL: {sl_price:.2f}, TP: {tp_price:.2f}")
+                else:
+                    extensions = TechnicalAnalysis.calculate_fibonacci_extensions(actual_high, actual_low)
+                    tp_price = extensions.get("level_1272", price * 1.05)
+                    sl_price = price * 0.98
+
                 # Save the position for tracking
-                RiskManager.save_position(symbol, price, position_size/price, side, tp_price=tp_price)
+                RiskManager.save_position(symbol, price, position_size/price, side, tp_price=tp_price, sl_price=sl_price)
                 
                 await TelegramService.send_message(f"🚀 <b>Live Trade Executed</b>\n{side} {symbol} ${position_size:.2f}")
             except Exception as e:
