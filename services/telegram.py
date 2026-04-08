@@ -47,9 +47,12 @@ class TelegramService:
         application.add_handler(CommandHandler("stats", TelegramService.cmd_status))
 
         logger.info("Starting Telegram Interactive Listener...")
-        await application.initialize()
-        await application.start()
-        await application.updater.start_polling()
+        try:
+            await application.initialize()
+            await application.start()
+            await application.updater.start_polling(drop_pending_updates=True)
+        except Exception as e:
+            logger.error(f"Failed to start Telegram polling: {e}")
 
     @staticmethod
     async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
