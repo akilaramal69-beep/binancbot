@@ -119,12 +119,14 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
         atr = 0.0
         volume_spike = False
         bos = False
+        elliott_phase = "None"
         if ohlcv:
             closes = [candle[4] for candle in ohlcv]
             volumes = [candle[5] for candle in ohlcv]
             atr = TechnicalAnalysis.calculate_atr(highs, lows, closes)
             volume_spike = TechnicalAnalysis.is_volume_spike(volumes)
             bos = TechnicalAnalysis.detect_bos(highs, lows, price)
+            elliott_phase = TechnicalAnalysis.identify_elliott_wave(closes)
             
         ema_match = False
         ema_tolerance = 0.005 if settings.FAST_TRADE_MODE else 0.002
@@ -134,6 +136,12 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
         if ema_20 > 0 and price > ema_20: score += 1
         if bos: score += 1
         if ema_20 > 0 and (price / ema_20) >= (1 + settings.MOMENTUM_EMA_GAP): score += 1
+
+        # SCORING - ELLIOTT WAVE BONUS
+        if elliott_phase in ["Wave 5 Breakout", "Wave 5 Ignition"]:
+            score += 2 # Explosive structural momentum
+        elif elliott_phase == "Wave 4 Retracement":
+            score += 1 # High probability accumulation zone
 
         # SCORING - FIBONACCI (Max 3)
         if fib_level_hit:
@@ -151,7 +159,7 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
         if volume_spike: score += 1
         
         score_jump = score - prev_score
-        logger.info(f"Institutional Trade Score {symbol}: {score}/10 (Jump: {score_jump}) | ATR: {atr:.4f} | Vol-Spike: {volume_spike} | BOS: {bos}")
+        logger.info(f"Institutional Score {symbol}: {score}/10 (Jump: {score_jump}) | Vol: {volume_spike} | BOS: {bos} | EW: {elliott_phase}")
 
         # Candle Structure Confirmation (Filter Fakeouts/Long Wicks)
         explosive_move = False

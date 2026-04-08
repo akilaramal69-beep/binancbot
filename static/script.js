@@ -1,4 +1,5 @@
 let nextScanTime = null;
+let botStartTime = null;
 
 async function updateDashboard() {
     try {
@@ -7,6 +8,9 @@ async function updateDashboard() {
         const statData = await statResp.json();
         if (statData.last_scan_time) {
             nextScanTime = (statData.last_scan_time * 1000) + (statData.scan_interval * 60 * 1000);
+        }
+        if (statData.bot_start_time) {
+            botStartTime = statData.bot_start_time * 1000;
         }
         if (statData.total_scans !== undefined) {
             const el = document.getElementById('total-scans-count');
@@ -119,8 +123,18 @@ async function updateDashboard() {
 
 // Global Countdown Loop
 setInterval(() => {
-    if (!nextScanTime) return;
     const now = Date.now();
+    
+    // Uptime Calculation
+    if (botStartTime) {
+        const upDiff = Math.max(0, now - botStartTime);
+        const upHours = Math.floor(upDiff / 3600000);
+        const upMins = Math.floor((upDiff % 3600000) / 60000);
+        const upSecs = Math.floor((upDiff % 60000) / 1000);
+        document.getElementById('bot-uptime').innerText = `Uptime: ${upHours}h ${upMins}m ${upSecs.toString().padStart(2, '0')}s`;
+    }
+    
+    if (!nextScanTime) return;
     const diff = Math.max(0, nextScanTime - now);
     
     if (diff === 0) {

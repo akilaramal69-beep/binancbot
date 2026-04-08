@@ -3,7 +3,10 @@ from core.config import settings
 import logging
 import os
 import json
+import time
 from execution.manager import RiskManager
+
+START_TIME = time.time()
 from execution.executor import TradingExecutor
 
 router = APIRouter()
@@ -43,7 +46,8 @@ async def get_status():
         "open_positions": len(positions),
         "scan_interval": settings.SCAN_INTERVAL_MINUTES,
         "last_scan_time": last_scan_time,
-        "total_scans": total_scans
+        "total_scans": total_scans,
+        "bot_start_time": START_TIME
     }
 
 @router.get("/analysis")
