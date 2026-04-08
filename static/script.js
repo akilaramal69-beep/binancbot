@@ -107,6 +107,7 @@ async function updateDashboard() {
                         Price <span style="color:white">$${data.price.toLocaleString()}</span> | 
                         Sentiment <span class="positive">${data.sentiment.toFixed(2)}</span> | 
                         Fib <span style="color:#e1e1e1">${data.fib_level || 'None'}</span> | 
+                        EW <span style="color:#e1e1e1">${data.elliott_phase || 'None'}</span> | 
                         Signal: <span class="${signalClass}" style="font-weight:bold">${data.signal}</span>
                     </div>
                 `;

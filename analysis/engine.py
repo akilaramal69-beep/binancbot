@@ -231,6 +231,7 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
                 "ema": ema_20,
                 "timestamp": timestamp_str,
                 "score": score,
+                "elliott_phase": elliott_phase,
                 "signal": f"BUY ({score}/10)" if should_trade else f"WATCH ({score}/10)"
             }
             cache[symbol] = cache_data
