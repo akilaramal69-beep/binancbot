@@ -5,6 +5,7 @@ import uvicorn
 import asyncio
 import os
 from contextlib import asynccontextmanager
+from fastapi.staticfiles import StaticFiles
 from services.telegram import TelegramService
 
 @asynccontextmanager
@@ -22,6 +23,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="AI Trading Bot", version="2.0.0", lifespan=lifespan)
 
 app.include_router(router)
+
+# Mount Static Files for WebUI
+if not os.path.exists("static"):
+    os.makedirs("static")
+app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))

@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Trading Sniper | Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo-area">
+                <h1>AI Trading Sniper</h1>
+                <p style="color: var(--text-secondary); font-size: 0.875rem;">Powered by Groq 120B & Fibonacci Logic</p>
+            </div>
+            <div id="bot-status" class="badge">Scanner Active</div>
+        </header>
+
+        <div class="grid">
+            <div class="card">
+                <div class="card-title">Open Positions <span id="open-count-badge" class="positive">●</span></div>
+                <div id="open-positions-count" class="card-value">0</div>
+            </div>
+            <div class="card">
+                <div class="card-title">Completed Trades</div>
+                <div id="total-trades" class="card-value">0</div>
+            </div>
+            <div class="card">
+                <div class="card-title">Active Watchlist</div>
+                <div id="watchlist-display" class="card-value" style="font-size: 1.25rem; margin-top: 0.5rem;">BTC, ETH, SOL, BNB</div>
+            </div>
+        </div>
+
+        <section class="positions-section">
+            <h2>Active Positions</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Asset</th>
+                        <th>Entry Price</th>
+                        <th>Amount</th>
+                        <th>Take Profit</th>
+                        <th>Stop Loss</th>
+                    </tr>
+                </thead>
+                <tbody id="positions-table-body">
+                    <tr>
+                        <td colspan="5" class="empty-state">Loading active trades...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section class="positions-section" style="margin-top: 4rem;">
+            <h2>Recent Trade History</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Asset</th>
+                        <th>Entry</th>
+                        <th>Exit</th>
+                        <th>Reason</th>
+                        <th>Closed At</th>
+                    </tr>
+                </thead>
+                <tbody id="history-table-body">
+                    <tr>
+                        <td colspan="5" class="empty-state">No historical data yet...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
