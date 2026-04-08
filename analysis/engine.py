@@ -99,15 +99,19 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
         should_trade = False
         side = "buy" 
         
-        # Pull historical sentiment for dynamic acceleration
+        # Pull historical sentiment and score for dynamic acceleration
         prev_sentiment = 0
+        prev_score = score
         cache_file = "latest_analysis.json"
         
         try:
             if os.path.exists(cache_file):
                 with open(cache_file, "r") as f:
                     cache_data = json.load(f)
-                    prev_sentiment = cache_data.get(symbol, {}).get("sentiment", sentiment_score)
+                    symbol_data = cache_data.get(symbol, {})
+                    prev_sentiment = symbol_data.get("sentiment", sentiment_score)
+                    # Support parsing from the new schema
+                    prev_score = symbol_data.get("score", score)
         except:
             pass
 
@@ -145,11 +149,36 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
         # SCORING - VOLUME (Max 1)
         if volume_spike: score += 1
         
-        logger.info(f"Institutional Trade Score {symbol}: {score}/10 | ATR: {atr:.4f} | Vol-Spike: {volume_spike} | BOS: {bos}")
+        score_jump = score - prev_score
+        logger.info(f"Institutional Trade Score {symbol}: {score}/10 (Jump: {score_jump}) | ATR: {atr:.4f} | Vol-Spike: {volume_spike} | BOS: {bos}")
 
+        # Candle Structure Confirmation (Filter Fakeouts/Long Wicks)
+        explosive_move = False
+        if ohlcv:
+            current_candle = ohlcv[-1]
+            c_open, c_high, c_low, c_close = current_candle[1:5]
+            
+            candle_size = c_high - c_low
+            
+            # Check if closes near high (top 20% of candle) to avoid 'Darth Maul' wicks
+            closes_near_high = False
+            if candle_size > 0:
+                closes_near_high = (c_close - c_low) / candle_size >= 0.8
+                
+            # Combine Volatility (ATR) and Structure
+            if candle_size > (1.5 * atr) and closes_near_high:
+                explosive_move = True
+
+        # Core Entry Trigger
         if score >= 7:
             should_trade = True
-            logger.info(f"🔥 SCORE ENTRY TRIGGERED: {symbol} at Score {score}!")
+            logger.info(f"🔥 SCORE ENTRY TRIGGERED: {symbol} at Score {score} (Jump: {score_jump})!")
+        elif score >= 6 and score_jump >= 3:
+            if explosive_move:
+                should_trade = True
+                logger.info(f"🚀 EXPLOSIVE ACCELERATION TRIGGERED: {symbol} Score {score} (Jump: {score_jump}) + Solid Strong Candle!")
+            else:
+                logger.info(f"⚠️ Acceleration Detected but weak candle structure/wicking for {symbol}. Waiting for confirmation.")
 
         # 4. Cache Analysis for WebUI
         try:
@@ -167,6 +196,7 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
                 "fib_level": fib_level_hit,
                 "ema": ema_20,
                 "timestamp": timestamp_str,
+                "score": score,
                 "signal": f"BUY ({score}/10)" if should_trade else f"WATCH ({score}/10)"
             }
             cache[symbol] = cache_data
