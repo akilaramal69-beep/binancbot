@@ -5,6 +5,7 @@ import os
 logger = logging.getLogger("uvicorn")
 
 POSITIONS_FILE = "positions.json"
+HISTORY_FILE = "history.json"
 
 class RiskManager:
     @staticmethod
@@ -53,16 +54,41 @@ class RiskManager:
             return {}
 
     @staticmethod
-    def remove_position(symbol: str):
+    def remove_position(symbol: str, exit_price: float = 0, reason: str = "Unknown"):
         """
-        Removes a closed position from the JSON file.
+        Removes a closed position and archives it to the history file.
         """
         positions = RiskManager.load_positions()
         if symbol in positions:
+            closed_pos = positions[symbol]
+            closed_pos["exit_price"] = exit_price
+            closed_pos["exit_reason"] = reason
+            closed_pos["closed_at"] = str(logging.Formatter().formatTime(logging.LogRecord("", 0, "", 0, "", (), None)))
+            
+            # Save to History
+            RiskManager.archive_to_history(closed_pos)
+            
             del positions[symbol]
             with open(POSITIONS_FILE, "w") as f:
                 json.dump(positions, f, indent=4)
-            logger.info(f"Position removed for {symbol}")
+            logger.info(f"Position removed and archived for {symbol}")
+
+    @staticmethod
+    def archive_to_history(data: dict):
+        """
+        Appends historical trade data to history.json.
+        """
+        history = []
+        if os.path.exists(HISTORY_FILE):
+            try:
+                with open(HISTORY_FILE, "r") as f:
+                    history = json.load(f)
+            except:
+                history = []
+        
+        history.append(data)
+        with open(HISTORY_FILE, "w") as f:
+            json.dump(history, f, indent=4)
 
     @staticmethod
     def update_trailing_stop(symbol: str, current_price: float):

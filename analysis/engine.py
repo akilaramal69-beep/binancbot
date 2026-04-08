@@ -79,9 +79,20 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
         # We now use the local ema_20 calculated above
         pass
 
+        # 2.75 Market Regime Check (Optional but recommended)
+        # Check if 24h volume change is healthy
+        try:
+            ticker = await executor.exchange.fetch_ticker(symbol)
+            vol_change = ticker.get('percentage', 0)
+            logger.info(f"24h Price Change: {vol_change}%")
+            # We avoid "falling knives" or completely dead markets
+            if vol_change < -15: # Extreme crash
+                 logger.warning(f"Market Regime: {symbol} is crashing too hard. Skipping.")
+                 return
+        except Exception as e:
+            logger.warning(f"Market Regime check failed for {symbol}: {e}")
+
         # 3. Decision Logic (Aggressive & Breakout)
-        should_trade = False
-        side = "buy" 
         
         # Standard Retracement Levels
         buy_levels = ["level_236", "level_382", "level_500", "level_618", "level_786"]
@@ -104,6 +115,12 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
             if fib_level_hit == "level_0":
                 should_trade = True
                 logger.info(f"Breakout Triggered: {symbol} at level_0 with sentiment {sentiment_score}")
+
+        # Check for Momentum (Buying the strength in a grinder)
+        if not should_trade and sentiment_score >= settings.MOMENTUM_SENTIMENT_THRESHOLD:
+            if ema_20 > 0 and (price / ema_20) >= (1 + settings.MOMENTUM_EMA_GAP):
+                should_trade = True
+                logger.info(f"Momentum Entry Triggered: {symbol} (High sentiment + EMA Gap)")
 
         if should_trade:
             summary_msg = f"✅ <b>Independent Trade Triggered</b> for {symbol}\n" \

@@ -72,7 +72,7 @@ class MarketScanner:
                     # Execute the Sell Order to close position
                     await executor.place_order(symbol, "sell", pos["amount"])
                     
-                    RiskManager.remove_position(symbol)
+                    RiskManager.remove_position(symbol, exit_price=current_price, reason=reason)
                     await TelegramService.send_message(
                         f"💰 <b>Position Closed</b> for {symbol}\n"
                         f"Reason: {reason}\n"
