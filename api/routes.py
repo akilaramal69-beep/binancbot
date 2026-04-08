@@ -4,9 +4,19 @@ import logging
 import os
 import json
 from execution.manager import RiskManager
+from execution.executor import TradingExecutor
 
 router = APIRouter()
 logger = logging.getLogger("uvicorn")
+
+@router.get("/balance")
+async def get_balance():
+    executor = TradingExecutor()
+    try:
+        balance = await executor.get_balance("USDT")
+        return {"balance": balance}
+    finally:
+        await executor.close_connection()
 
 @router.get("/status")
 async def get_status():
@@ -20,6 +30,14 @@ async def get_status():
         "status": "active",
         "open_positions": len(positions)
     }
+
+@router.get("/analysis")
+async def get_analysis():
+    cache_file = "latest_analysis.json"
+    if os.path.exists(cache_file):
+        with open(cache_file, "r") as f:
+            return json.load(f)
+    return {}
 
 @router.get("/stats")
 async def get_stats():

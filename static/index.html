@@ -21,6 +21,10 @@
 
         <div class="grid">
             <div class="card">
+                <div class="card-title">Wallet Balance (USDT)</div>
+                <div id="wallet-balance" class="card-value" style="color: var(--accent-color)">$0.00</div>
+            </div>
+            <div class="card">
                 <div class="card-title">Open Positions <span id="open-count-badge" class="positive">●</span></div>
                 <div id="open-positions-count" class="card-value">0</div>
             </div>
@@ -28,13 +32,22 @@
                 <div class="card-title">Completed Trades</div>
                 <div id="total-trades" class="card-value">0</div>
             </div>
-            <div class="card">
+            <div class="card" style="grid-column: span 1;">
+                <div class="card-title">AI Signal Sentiment</div>
+                <div id="latest-sentiment" class="card-value positive">0.00</div>
+            </div>
+            <div class="card" style="grid-column: span 1;">
                 <div class="card-title">Active Watchlist</div>
                 <div id="watchlist-display" class="card-value" style="font-size: 1.25rem; margin-top: 0.5rem;">BTC, ETH, SOL, BNB</div>
             </div>
         </div>
 
         <section class="positions-section">
+            <h2>AI Intelligence Feed</h2>
+            <div id="analysis-feed" class="card" style="background: rgba(0,0,0,0.3); font-family: 'Courier New', monospace; font-size: 0.875rem; min-height: 150px; border-left: 4px solid var(--accent-color);">
+                <div class="empty-state">Waiting for AI scanner...</div>
+            </div>
+        </section>
             <h2>Active Positions</h2>
             <table>
                 <thead>

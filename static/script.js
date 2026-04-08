@@ -1,5 +1,10 @@
 async function updateDashboard() {
     try {
+        // Fetch Balance
+        const balResp = await fetch('/balance');
+        const balData = await balResp.json();
+        document.getElementById('wallet-balance').innerText = `$${balData.balance.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+
         // Fetch Stats (Open positions and History)
         const response = await fetch('/stats');
         const data = await response.json();
@@ -49,6 +54,38 @@ async function updateDashboard() {
                     </tr>
                 `;
             });
+        }
+
+        // 4. Update AI Analysis Feed
+        const analysisResponse = await fetch('/analysis');
+        const analysisData = await analysisResponse.json();
+        const feed = document.getElementById('analysis-feed');
+        
+        if (Object.keys(analysisData).length > 0) {
+            feed.innerHTML = '';
+            let avgSentiment = 0;
+            let count = 0;
+            
+            for (const [symbol, data] of Object.entries(analysisData)) {
+                avgSentiment += data.sentiment;
+                count++;
+                
+                const signalClass = data.signal === "BUY" ? "positive" : "text-secondary";
+                feed.innerHTML += `
+                    <div style="margin-bottom: 0.75rem; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 0.5rem;">
+                        <span class="symbol" style="color: var(--accent-color)">[${data.timestamp}]</span> 
+                        <span style="font-weight: 800">${symbol}:</span> 
+                        Price <span style="color:white">$${data.price.toLocaleString()}</span> | 
+                        Sentiment <span class="positive">${data.sentiment.toFixed(2)}</span> | 
+                        Fib <span style="color:#e1e1e1">${data.fib_level || 'None'}</span> | 
+                        Signal: <span class="${signalClass}" style="font-weight:bold">${data.signal}</span>
+                    </div>
+                `;
+            }
+            
+            if (count > 0) {
+                document.getElementById('latest-sentiment').innerText = (avgSentiment / count).toFixed(2);
+            }
         }
 
     } catch (error) {

@@ -124,6 +124,27 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
                 should_trade = True
                 logger.info(f"Momentum Entry Triggered: {symbol} (High sentiment + EMA Gap)")
 
+        # 4. Cache Analysis for WebUI
+        try:
+            cache_file = "latest_analysis.json"
+            cache = {}
+            if os.path.exists(cache_file):
+                with open(cache_file, "r") as f:
+                    cache = json.load(f)
+            
+            cache[symbol] = {
+                "price": price,
+                "sentiment": sentiment_score,
+                "fib_level": fib_level_hit,
+                "ema": ema_20,
+                "timestamp": str(logging.Formatter().formatTime(logging.LogRecord("", 0, "", 0, "", (), None))),
+                "signal": "BUY" if should_trade else "WATCH"
+            }
+            with open(cache_file, "w") as f:
+                json.dump(cache, f, indent=4)
+        except Exception as e:
+            logger.warning(f"Failed to cache analysis for {symbol}: {e}")
+
         if should_trade:
             summary_msg = f"✅ <b>Independent Trade Triggered</b> for {symbol}\n" \
                         f"Sentiment: {sentiment_score:.2f}\n" \
