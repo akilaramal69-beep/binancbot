@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     TELEGRAM_CHAT_ID: str = ""
     ENABLE_TELEGRAM: bool = False
 
+    # Scanning
+    WATCH_SYMBOLS: str = "BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT"
+    SCAN_INTERVAL_MINUTES: int = 15
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 settings = Settings()

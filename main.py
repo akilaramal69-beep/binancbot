@@ -1,9 +1,20 @@
 from fastapi import FastAPI
 from api.routes import router
+from services.scanner import MarketScanner
 import uvicorn
+import asyncio
 import os
+from contextlib import asynccontextmanager
 
-app = FastAPI(title="AI Trading Bot", version="1.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Start scanner on startup
+    scanner = MarketScanner()
+    asyncio.create_task(scanner.run_forever())
+    yield
+    # Shutdown logic if needed
+
+app = FastAPI(title="AI Trading Bot", version="2.0.0", lifespan=lifespan)
 
 app.include_router(router)
 
