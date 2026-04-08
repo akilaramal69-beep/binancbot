@@ -9,9 +9,9 @@ HISTORY_FILE = "history.json"
 
 class RiskManager:
     @staticmethod
-    def calculate_position_size(balance: float, risk_percent: float = 0.02, min_order_usd: float = 10.0) -> float:
+    def calculate_position_size(balance: float, risk_percent: float = 0.02, min_order_usd: float = 11.5) -> float:
         """
-        Calculates position size with Binance $10 minimum floor.
+        Calculates position size with a safe $11.5 minimum floor for fees.
         """
         size = balance * risk_percent
         if balance >= min_order_usd and size < min_order_usd:

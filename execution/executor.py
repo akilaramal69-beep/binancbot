@@ -13,6 +13,23 @@ class TradingExecutor:
             'enableRateLimit': True,
         })
         self.exchange.set_sandbox_mode(settings.USE_TESTNET)
+        self.markets = None
+
+    async def _ensure_markets(self):
+        if self.markets is None:
+            self.markets = await self.exchange.load_markets()
+
+    def amount_to_precision(self, symbol: str, amount: float) -> str:
+        """
+        Truncates quantity to match LOT_SIZE requirements.
+        """
+        return self.exchange.amount_to_precision(symbol, amount)
+
+    def price_to_precision(self, symbol: str, price: float) -> str:
+        """
+        Truncates price to match PRICE_FILTER requirements.
+        """
+        return self.exchange.price_to_precision(symbol, price)
 
     async def get_balance(self, coin: str = "USDT"):
         balance = await self.exchange.fetch_balance()
@@ -34,18 +51,24 @@ class TradingExecutor:
 
     async def place_order(self, symbol: str, side: str, amount: float, price: float = None):
         """
-        Places a market or limit order.
+        Places a market or limit order with correct precision.
         """
         try:
+            await self._ensure_markets()
+            
+            # Truncate amount to match exchange precision (LOT_SIZE)
+            formatted_amount = self.amount_to_precision(symbol, amount)
+            
             if price:
-                order = await self.exchange.create_order(symbol, 'limit', side, amount, price)
+                formatted_price = self.price_to_precision(symbol, price)
+                order = await self.exchange.create_order(symbol, 'limit', side, formatted_amount, formatted_price)
             else:
-                order = await self.exchange.create_order(symbol, 'market', side, amount)
+                order = await self.exchange.create_order(symbol, 'market', side, formatted_amount)
             
             logger.info(f"Order placed successfully: {order['id']}")
             return order
         except Exception as e:
-            logger.error(f"Error placing order: {e}")
+            logger.error(f"Error placing order for {symbol}: {e}")
             return None
 
     async def close_connection(self):
