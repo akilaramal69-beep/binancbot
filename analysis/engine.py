@@ -15,6 +15,12 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
     """
     is_demo_context = settings.USE_TESTNET or False
     
+    # NEW: Check if we already have an open position for this symbol
+    positions = RiskManager.load_positions()
+    if symbol in positions:
+        logger.info(f"Already holding a position for {symbol}. Skipping scanner for new entries.")
+        return
+
     executor = TradingExecutor()
     try:
         # 0. Fetch latest price
