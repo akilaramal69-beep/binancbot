@@ -21,6 +21,10 @@ async def get_balance():
 @router.get("/status")
 async def get_status():
     positions = RiskManager.load_positions()
+    last_scan_time = 0
+    if os.path.exists("latest_analysis.json"):
+        last_scan_time = os.path.getmtime("latest_analysis.json")
+        
     return {
         "bot_name": "AI Trading Bot",
         "mode": "Independent Scanner",
@@ -28,7 +32,9 @@ async def get_status():
         "exchange": settings.EXCHANGE_ID,
         "testnet": settings.USE_TESTNET,
         "status": "active",
-        "open_positions": len(positions)
+        "open_positions": len(positions),
+        "scan_interval": settings.SCAN_INTERVAL_MINUTES,
+        "last_scan_time": last_scan_time
     }
 
 @router.get("/analysis")

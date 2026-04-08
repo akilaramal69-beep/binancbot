@@ -1,5 +1,14 @@
+let nextScanTime = null;
+
 async function updateDashboard() {
     try {
+        // Fetch Status for Countdown
+        const statResp = await fetch('/status');
+        const statData = await statResp.json();
+        if (statData.last_scan_time) {
+            nextScanTime = (statData.last_scan_time * 1000) + (statData.scan_interval * 60 * 1000);
+        }
+
         // Fetch Balance
         const balResp = await fetch('/balance');
         const balData = await balResp.json();
@@ -102,6 +111,21 @@ async function updateDashboard() {
         document.getElementById('bot-status').style.color = "#f85149";
     }
 }
+
+// Global Countdown Loop
+setInterval(() => {
+    if (!nextScanTime) return;
+    const now = Date.now();
+    const diff = Math.max(0, nextScanTime - now);
+    
+    if (diff === 0) {
+        document.getElementById('scan-info').innerHTML = 'Scanning now... <span style="animation: pulse 1s infinite;">📡</span>';
+    } else {
+        const mins = Math.floor(diff / 60000);
+        const secs = Math.floor((diff % 60000) / 1000);
+        document.getElementById('scan-info').innerText = `Next scan in: ${mins}m ${secs.toString().padStart(2, '0')}s`;
+    }
+}, 1000);
 
 // Update every 30 seconds
 setInterval(updateDashboard, 30000);
