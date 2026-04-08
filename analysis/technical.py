@@ -20,6 +20,18 @@ class TechnicalAnalysis:
         return levels
 
     @staticmethod
+    def calculate_fibonacci_extensions(high: float, low: float) -> dict:
+        """
+        Calculates Fibonacci extension levels for Take-Profit targets.
+        """
+        diff = high - low
+        extensions = {
+            "level_1272": high + 0.272 * diff,
+            "level_1618": high + 0.618 * diff
+        }
+        return extensions
+
+    @staticmethod
     def is_price_at_fib_level(price: float, levels: dict, tolerance: float = 0.005) -> str:
         """
         Checks if the current price is near any Fibonacci level within a tolerance percentage.

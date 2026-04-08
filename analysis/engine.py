@@ -77,14 +77,21 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
         should_trade = False
         side = "buy" 
         
-        # Standard Retracement Levels (Including shallow ones for aggressive trading)
+        # Standard Retracement Levels
         buy_levels = ["level_236", "level_382", "level_500", "level_618", "level_786"]
         
+        # EMA Precision Check (Tolerance Band: 0.2%)
+        ema_match = False
+        if ema_20 > 0:
+            if abs(price - ema_20) / ema_20 < 0.002: # 0.2% tolerance
+                ema_match = True
+                logger.info(f"EMA Trend Match (Within Tolerance) for {symbol}")
+
         # Check for Retracement
-        if sentiment_score > 0.2 and fib_level_hit in buy_levels:
-            if ema_20 == 0 or price > ema_20:
+        if sentiment_score > 0.2 and (fib_level_hit in buy_levels or ema_match):
+            if ema_20 == 0 or price >= ema_20 or ema_match:
                 should_trade = True
-                logger.info(f"Aggressive Entry Match: {symbol} at {fib_level_hit}")
+                logger.info(f"Entry Match: {symbol} at {fib_level_hit or 'EMA'}")
 
         # Check for Breakout (Sentiment must be very high)
         if not should_trade and sentiment_score >= settings.SENTIMENT_BREAKOUT_THRESHOLD:
@@ -105,8 +112,17 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
                 balance = await executor.get_balance("USDT")
                 position_size = RiskManager.calculate_position_size(balance)
                 
-                # await executor.place_order(symbol, side, position_size/price)
+                # Place actual Buy Order
+                await executor.place_order(symbol, side, position_size/price)
                 logger.info(f"EXECUTING LIVE TRADE: {side} {symbol} size: {position_size}")
+                
+                # Calculate Fibonacci Extensions for Take-Profit
+                extensions = TechnicalAnalysis.calculate_fibonacci_extensions(actual_high, actual_low)
+                tp_price = extensions["level_1272"]
+                
+                # Save the position for tracking
+                RiskManager.save_position(symbol, price, position_size/price, side, tp_price=tp_price)
+                
                 await TelegramService.send_message(f"🚀 <b>Live Trade Executed</b>\n{side} {symbol} ${position_size:.2f}")
             except Exception as e:
                 logger.error(f"Execution failed: {e}")
