@@ -2,11 +2,15 @@ let nextScanTime = null;
 
 async function updateDashboard() {
     try {
-        // Fetch Status for Countdown
+        // Fetch Status for Countdown & Metrics
         const statResp = await fetch('/status');
         const statData = await statResp.json();
         if (statData.last_scan_time) {
             nextScanTime = (statData.last_scan_time * 1000) + (statData.scan_interval * 60 * 1000);
+        }
+        if (statData.total_scans !== undefined) {
+            const el = document.getElementById('total-scans-count');
+            if (el) el.innerText = statData.total_scans.toLocaleString();
         }
 
         // Fetch Balance

@@ -51,11 +51,39 @@ class MarketScanner:
                 RiskManager.update_trailing_stop(symbol, current_price)
                 
                 # Fetch updated data to check TP/SL
-                updated_pos = RiskManager.load_positions().get(symbol)
                 sl_price = updated_pos["sl_price"]
                 tp_price = updated_pos["tp_price"]
+                entry_price = updated_pos["entry_price"]
+                amount = updated_pos["amount"]
 
-                # Check Exit
+                target_distance = tp_price - entry_price
+                level1 = entry_price + (target_distance * 0.5)
+                level2 = entry_price + (target_distance * 0.9)
+
+                # Level 1: Breakeven (50% to target)
+                if target_distance > 0 and current_price >= level1 and not updated_pos.get("breakeven"):
+                    new_sl = max(sl_price, entry_price) # Move Stop Loss to Entry
+                    RiskManager.update_position_data(symbol, {"breakeven": True, "sl_price": new_sl})
+                    await TelegramService.send_message(f"🛡️ <b>Breakeven Activated</b> for {symbol}\nPrice reached 50% of target. Stop Loss secured at ${new_sl:.2f}.")
+
+                # Level 2: Scale Out (90% to target)
+                if target_distance > 0 and current_price >= level2 and not updated_pos.get("scaled_out"):
+                    half_amount = amount * 0.5
+                    # Binance strict MIN_NOTIONAL check (~$10, we use $11 to be safe)
+                    if half_amount * current_price >= 11:
+                        logger.info(f"Selling 50% of {symbol} at Level 2...")
+                        await executor.place_order(symbol, "sell", half_amount)
+                        RiskManager.update_position_data(symbol, {
+                            "scaled_out": True, 
+                            "amount": amount - half_amount,
+                            "sl_price": current_price * 0.98 # Tighten SL
+                        })
+                        await TelegramService.send_message(f"🎯 <b>Level 2 Profit (50%)</b> for {symbol}\nSecured 50% profit, letting the rest run.")
+
+                # Fetch updated SL after multi-step logic might have changed it
+                sl_price = RiskManager.load_positions().get(symbol, {}).get("sl_price", sl_price)
+
+                # Check Exit (Full closure)
                 should_exit = False
                 reason = ""
                 

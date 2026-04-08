@@ -110,6 +110,17 @@ class RiskManager:
                 json.dump(positions, f, indent=4)
 
     @staticmethod
+    def update_position_data(symbol: str, data: dict):
+        """
+        Updates arbitrary keys for a given position.
+        """
+        positions = RiskManager.load_positions()
+        if symbol in positions:
+            positions[symbol].update(data)
+            with open(POSITIONS_FILE, "w") as f:
+                json.dump(positions, f, indent=4)
+
+    @staticmethod
     def get_stop_loss_price(entry_price: float, side: str, stop_loss_percent: float = 0.02) -> float:
         if side == "buy":
             return entry_price * (1 - stop_loss_percent)

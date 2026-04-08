@@ -109,7 +109,7 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
                 logger.info(f"EMA Trend Match (Within Tolerance) for {symbol}")
 
         # Check for Retracement
-        if sentiment_score > 0.2 and (fib_level_hit in buy_levels or ema_match):
+        if sentiment_score >= settings.SENTIMENT_ENTRY_THRESHOLD and (fib_level_hit in buy_levels or ema_match):
             if ema_20 == 0 or price >= ema_20 or ema_match:
                 should_trade = True
                 logger.info(f"Entry Match: {symbol} at {fib_level_hit or 'EMA'}")
@@ -164,6 +164,18 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
                 
             with open(history_file, "w") as f:
                 json.dump(history_list, f, indent=4)
+                
+            # Update Total Scans Counter
+            total_scans_file = "total_scans.json"
+            total_scans = 0
+            if os.path.exists(total_scans_file):
+                try:
+                    with open(total_scans_file, "r") as f:
+                        total_scans = json.load(f).get("count", 0)
+                except:
+                    pass
+            with open(total_scans_file, "w") as f:
+                json.dump({"count": total_scans + 1}, f)
                 
         except Exception as e:
             logger.warning(f"Failed to cache analysis for {symbol}: {e}")

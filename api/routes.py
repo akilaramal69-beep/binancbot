@@ -25,6 +25,14 @@ async def get_status():
     if os.path.exists("latest_analysis.json"):
         last_scan_time = os.path.getmtime("latest_analysis.json")
         
+    total_scans = 0
+    if os.path.exists("total_scans.json"):
+        try:
+            with open("total_scans.json", "r") as f:
+                total_scans = json.load(f).get("count", 0)
+        except:
+            pass
+        
     return {
         "bot_name": "AI Trading Bot",
         "mode": "Independent Scanner",
@@ -34,7 +42,8 @@ async def get_status():
         "status": "active",
         "open_positions": len(positions),
         "scan_interval": settings.SCAN_INTERVAL_MINUTES,
-        "last_scan_time": last_scan_time
+        "last_scan_time": last_scan_time,
+        "total_scans": total_scans
     }
 
 @router.get("/analysis")

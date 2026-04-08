@@ -31,7 +31,8 @@ class Settings(BaseSettings):
     WATCH_SYMBOLS: str = "BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT"
     SCAN_INTERVAL_MINUTES: int = 15
     FIB_TOLERANCE: float = 0.015 # 1.5% sensitivity
-    SENTIMENT_BREAKOUT_THRESHOLD: float = 0.8
+    SENTIMENT_ENTRY_THRESHOLD: float = 0.85
+    SENTIMENT_BREAKOUT_THRESHOLD: float = 0.88
     MOMENTUM_SENTIMENT_THRESHOLD: float = 0.92
     MOMENTUM_EMA_GAP: float = 0.01 # 1% above EMA
 
