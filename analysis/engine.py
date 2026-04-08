@@ -127,7 +127,8 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
             bos = TechnicalAnalysis.detect_bos(highs, lows, price)
             
         ema_match = False
-        if ema_20 > 0 and abs(price - ema_20) / ema_20 < 0.002: ema_match = True
+        ema_tolerance = 0.005 if settings.FAST_TRADE_MODE else 0.002
+        if ema_20 > 0 and abs(price - ema_20) / ema_20 < ema_tolerance: ema_match = True
 
         # SCORING - TREND & STRUCTURE (Max 3)
         if ema_20 > 0 and price > ema_20: score += 1
@@ -187,7 +188,8 @@ async def analyze_symbol(symbol: str, is_demo: bool = None):
                 explosive_move = True
 
         # Core Entry Triggers
-        if score >= 7:
+        required_score = 5 if settings.FAST_TRADE_MODE else 7
+        if score >= required_score:
             should_trade = True
             logger.info(f"🔥 SCORE ENTRY TRIGGERED: {symbol} at Score {score} (Jump: {score_jump})!")
         elif score >= 6 and score_jump >= 3:

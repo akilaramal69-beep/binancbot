@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     SENTIMENT_BREAKOUT_THRESHOLD: float = 0.88
     MOMENTUM_SENTIMENT_THRESHOLD: float = 0.92
     MOMENTUM_EMA_GAP: float = 0.01 # 1% above EMA
+    FAST_TRADE_MODE: bool = False # Lowers the score threshold to 5 and widens EMA tolerance
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
