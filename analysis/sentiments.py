@@ -52,6 +52,33 @@ class SentimentAnalysis:
 
     @staticmethod
     async def _call_groq(prompt: str) -> float:
-        # Placeholder for Groq API call
-        # In a real app, use the 'groq' python library or httpx
-        return 0.5  # Mocking a bullish sentiment for now
+        """
+        Calls the Groq API with the specified model.
+        """
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {settings.GROQ_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": settings.GROQ_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(url, json=payload, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+                content = data["choices"][0]["message"]["content"].strip()
+                
+                # Extract the numeric sentiment value
+                import re
+                match = re.search(r"(-?\d+(\.\d+)?)", content)
+                if match:
+                    return float(match.group(1))
+                return 0.0
+        except Exception as e:
+            logger.error(f"Error calling Groq: {e}")
+            return 0.0

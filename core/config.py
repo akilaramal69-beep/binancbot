@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     # AI
     OPENAI_API_KEY: str = ""
     GROQ_API_KEY: str = ""
+    GROQ_MODEL: str = "gpt-oss-120b" # Or specific model provided by user
 
     # News
     CRYPTO_PANIC_API_KEY: str = ""
