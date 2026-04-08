@@ -4,13 +4,17 @@ from services.scanner import MarketScanner
 import uvicorn
 import asyncio
 import os
-from contextlib import asynccontextmanager
+from services.telegram import TelegramService
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Start scanner on startup
     scanner = MarketScanner()
     asyncio.create_task(scanner.run_forever())
+    
+    # Start Telegram interactive bot
+    asyncio.create_task(TelegramService.start_interactive_bot())
+    
     yield
     # Shutdown logic if needed
 
