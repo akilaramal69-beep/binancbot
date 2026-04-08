@@ -21,6 +21,9 @@ EXCHANGE_SECRET=your_binance_secret
 USE_TESTNET=true # Set to false for live trading
 
 OPENAI_API_KEY=your_openai_key
+GROQ_API_KEY=your_groq_key
+GROQ_MODEL=gpt-oss-120b # Custom Groq model ID
+
 ALPHA_VANTAGE_API_KEY=your_av_key
 
 TELEGRAM_BOT_TOKEN=your_bot_token
@@ -62,4 +65,6 @@ To test with fake money:
 3. Use `"is_demo": true` in TradingView for "simulation-only" mode (no trading at all).
 
 ---
+**⚠️ Budget Note**: This bot is optimized for small accounts ($10 starting budget). It automatically adjusts position sizes to meet Binance's minimum order requirements.
+
 **Disclaimer**: Use this bot at your own risk. Trading involves significant financial danger.
