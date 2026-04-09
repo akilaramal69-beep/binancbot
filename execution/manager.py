@@ -12,14 +12,73 @@ _file_lock = asyncio.Lock()
 
 class RiskManager:
     @staticmethod
-    def calculate_position_size(balance: float, risk_percent: float = 0.02, min_order_usd: float = 11.5) -> float:
+    def calculate_position_size(balance: float, entry_price: float, atr: float, risk_percent: float = 0.01, min_order_usd: float = 11.5) -> tuple:
         """
-        Calculates position size with a safe $11.5 minimum floor for fees.
+        Calculates risk-based position size with hybrid stop logic.
+        Returns: (position_size_usd, stop_distance_percent)
+        
+        Uses max of ATR-based stop or minimum fixed stop to prevent premature stop-outs.
         """
-        size = balance * risk_percent
-        if balance >= min_order_usd and size < min_order_usd:
-            return min_order_usd
-        return size
+        if entry_price <= 0:
+            size = balance * 0.01
+            return max(size, min_order_usd), 0.01
+        
+        # Calculate ATR-based stop distance
+        atr_stop_distance = 0.0
+        if atr > 0:
+            atr_stop_distance = atr / entry_price
+        
+        # Hybrid stop: use ATR if larger, otherwise minimum fixed stop
+        min_stop_percent = 0.01  # 1% minimum for scalping
+        stop_distance_percent = max(atr_stop_distance, min_stop_percent)
+        
+        # Ensure minimum stop distance (prevents huge positions)
+        if stop_distance_percent < 0.005:  # Min 0.5% stop
+            stop_distance_percent = 0.005
+        
+        risk_amount = balance * risk_percent
+        position_size = risk_amount / stop_distance_percent
+        
+        # Enforce minimum notional for exchange fees
+        if position_size < min_order_usd:
+            position_size = min_order_usd
+        
+        return position_size, stop_distance_percent
+
+    @staticmethod
+    def calculate_tp_sl(entry_price: float, atr: float, mode: str = "scalping", trend_strength: float = 0.5) -> tuple:
+        """
+        Calculate TP and SL based on trading mode AND trend strength.
+        Adaptive TP: let strong trends run more.
+        Returns: (tp_price, sl_price)
+        """
+        from core.config import settings
+        
+        # Base percentages from mode
+        if mode == "swing":
+            sl_percent = settings.SWING_SL_PERCENT
+            base_tp_percent = settings.SWING_TP_PERCENT
+        else:  # scalping
+            sl_percent = settings.SCALP_SL_PERCENT
+            base_tp_percent = settings.SCALP_TP_PERCENT
+        
+        # Adaptive TP based on trend strength
+        if trend_strength > 0.7:
+            tp_percent = base_tp_percent * 2  # Double TP in strong trends
+        elif trend_strength > 0.5:
+            tp_percent = base_tp_percent * 1.25  # 25% more in moderate trends
+        else:
+            tp_percent = base_tp_percent
+        
+        # SL: use ATR if available, otherwise fixed
+        if atr > 0:
+            atr_sl = atr / entry_price
+            sl_percent = max(sl_percent, atr_sl)  # Never use smaller than ATR stop
+        
+        tp_price = entry_price * (1 + tp_percent)
+        sl_price = entry_price * (1 - sl_percent)
+        
+        return tp_price, sl_price
 
     @staticmethod
     async def save_position(symbol: str, entry_price: float, amount: float, side: str, tp_price: float = 0.0, sl_price: float = 0.0, entry_time: float = 0.0):

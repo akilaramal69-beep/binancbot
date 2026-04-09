@@ -43,10 +43,14 @@ async def _get_weighted_sentiment(symbol: str) -> float:
         return 0.5 # Neutral fallback
 
 def _calculate_institutional_score(symbol: str, price: float, ema_20: float, fib_level_hit: str, 
-                                 sentiment_score: float, prev_sentiment: float, 
-                                 volume_spike: bool, bos: bool, elliott_phase: str) -> int:
+                                  sentiment_score: float, prev_sentiment: float, 
+                                  volume_spike: bool, bos: bool, elliott_phase: str,
+                                  trend_strength: float = 0.5) -> int:
     """ Computes the 10-point institutional scoring matrix. """
     score = 0
+    
+    # 0. Trend Strength Gate (if trend is weak, reduce score)
+    trend_multiplier = 1.0 if trend_strength >= settings.MIN_TREND_STRENGTH else 0.5
     
     # 1. Trend & Structure (Max 3)
     if ema_20 > 0 and price > ema_20: score += 1
@@ -77,6 +81,9 @@ def _calculate_institutional_score(symbol: str, price: float, ema_20: float, fib
 
     # 5. Volume (Max 1)
     if volume_spike: score += 1
+    
+    # Apply trend multiplier
+    score = int(score * trend_multiplier)
     
     return min(score, 10)
 
@@ -149,6 +156,204 @@ def _save_analysis_data(symbol: str, data: dict):
     except Exception as e:
         logger.warning(f"Failed to save analysis for {symbol}: {e}")
 
+async def analyze_symbol_full(symbol: str) -> dict:
+    """
+    Full analysis returning dict for trade ranking.
+    Returns: {symbol, score, trend_strength, sentiment, price, atr, should_trade, reason}
+    """
+    result = {
+        "symbol": symbol,
+        "score": 0,
+        "trend_strength": 0.0,
+        "sentiment": 0.5,
+        "price": None,
+        "atr": 0.0,
+        "ema_20": 0.0,
+        "fib_level_hit": "",
+        "bos": False,
+        "elliott_phase": "None",
+        "volume_spike": False,
+        "explosive_move": False,
+        "should_trade": False,
+        "reason": "",
+        "executor": None
+    }
+    
+    positions = RiskManager.load_positions()
+    
+    if len(positions) >= settings.MAX_CONCURRENT_POSITIONS:
+        result["reason"] = "max_positions_reached"
+        return result
+    
+    if symbol in positions:
+        result["reason"] = "already_holding"
+        return result
+
+    executor = TradingExecutor()
+    result["executor"] = executor
+    
+    try:
+        price = await executor.get_latest_price(symbol)
+        if not price:
+            result["reason"] = "no_price"
+            return result
+        
+        result["price"] = price
+        
+        sentiment_task = _get_weighted_sentiment(symbol)
+        ohlcv_task = executor.fetch_ohlcv(symbol, timeframe='1h', limit=50)
+        sentiment_score, ohlcv = await asyncio.gather(sentiment_task, ohlcv_task)
+        
+        result["sentiment"] = sentiment_score
+        
+        if not ohlcv:
+            result["reason"] = "no_ohlcv"
+            return result
+            
+        highs = [c[2] for c in ohlcv]
+        lows = [c[3] for c in ohlcv]
+        closes = [c[4] for c in ohlcv]
+        volumes = [c[5] for c in ohlcv]
+        
+        market_regime = TechnicalAnalysis.detect_market_regime(closes, settings.MARKET_REGIME_EMA_PERIOD)
+        if market_regime == "downtrend":
+            result["reason"] = "downtrend"
+            return result
+        
+        trend_strength = TechnicalAnalysis.calculate_trend_strength(closes, highs)
+        result["trend_strength"] = trend_strength
+        
+        fib_level_hit = TechnicalAnalysis.is_price_at_fib_level(price, 
+            TechnicalAnalysis.calculate_fibonacci_levels(max(highs), min(lows)), 
+            settings.FIB_TOLERANCE)
+        result["fib_level_hit"] = fib_level_hit if fib_level_hit else ""
+        
+        ema_20 = TechnicalAnalysis.calculate_ema(highs, period=20, symbol=symbol)
+        result["ema_20"] = ema_20
+        
+        atr = TechnicalAnalysis.calculate_atr(highs, lows, closes, symbol=symbol)
+        result["atr"] = atr
+        
+        volume_spike = TechnicalAnalysis.is_volume_spike(volumes)
+        result["volume_spike"] = volume_spike
+        
+        bos = TechnicalAnalysis.detect_bos(highs, lows, price)
+        result["bos"] = bos
+        
+        elliott_phase = TechnicalAnalysis.identify_elliott_wave(closes, atr)
+        result["elliott_phase"] = elliott_phase
+        
+        prev_sentiment = sentiment_score
+        prev_score = 0
+        if os.path.exists("latest_analysis.json"):
+            try:
+                with open("latest_analysis.json", "r") as f:
+                    cache = json.load(f)
+                    s_data = cache.get(symbol, {})
+                    prev_sentiment = s_data.get("sentiment", sentiment_score)
+                    prev_score = s_data.get("score", 0)
+            except: pass
+
+        score = _calculate_institutional_score(
+            symbol, price, ema_20, result["fib_level_hit"], sentiment_score, 
+            prev_sentiment, volume_spike, bos, elliott_phase, trend_strength
+        )
+        result["score"] = min(score, 10)
+        score_jump = result["score"] - prev_score
+        
+        explosive_move = _check_explosive_confirmation(ohlcv, highs, atr, price)
+        result["explosive_move"] = explosive_move
+        
+        required_score = 5 if settings.FAST_TRADE_MODE else 7
+        trend_gate_passed = trend_strength >= settings.MIN_TREND_STRENGTH
+        
+        if result["score"] >= required_score and trend_gate_passed:
+            result["should_trade"] = True
+            result["reason"] = "score_passed"
+        elif result["score"] >= 6 and score_jump >= 3 and explosive_move and trend_gate_passed:
+            result["should_trade"] = True
+            result["reason"] = "momentum_explosive"
+        elif score_jump >= 3 and volume_spike and not bos and explosive_move and trend_gate_passed:
+            result["should_trade"] = True
+            result["reason"] = "volume_explosive"
+        
+        if not result["should_trade"]:
+            if not trend_gate_passed:
+                result["reason"] = "weak_trend"
+            elif result["score"] < required_score:
+                result["reason"] = "low_score"
+        
+        # Save analysis data
+        analysis_data = {
+            "price": price,
+            "sentiment": sentiment_score,
+            "fib_level": result["fib_level_hit"],
+            "ema": ema_20,
+            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "score": result["score"],
+            "elliott_phase": elliott_phase,
+            "signal": f"BUY ({result['score']}/10)" if result["should_trade"] else f"WATCH ({result['score']}/10)"
+        }
+        _save_analysis_data(symbol, analysis_data)
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error analyzing {symbol}: {e}")
+        result["reason"] = f"error: {str(e)}"
+        return result
+    finally:
+        await executor.close_connection()
+
+
+async def execute_trade(result: dict):
+    """Execute a trade from analysis result."""
+    symbol = result["symbol"]
+    price = result["price"]
+    atr = result["atr"]
+    trend_strength = result["trend_strength"]
+    reduction = result.get("position_reduction", 1.0)  # Default full size
+    
+    executor = TradingExecutor()
+    try:
+        balance = await executor.get_balance("USDT")
+        
+        pos_size_usd, stop_distance = RiskManager.calculate_position_size(
+            balance, price, atr, 
+            risk_percent=settings.RISK_PER_TRADE_PERCENT
+        )
+        
+        if pos_size_usd < 11.5:
+            pos_size_usd = 11.5
+        
+        # Apply position reduction (0.5 for correlated clusters)
+        pos_size_usd = pos_size_usd * reduction
+        
+        if balance < pos_size_usd:
+            logger.error(f"Insufficient balance for {symbol}")
+            return False
+
+        amount = pos_size_usd / price
+        await executor.place_order(symbol, "buy", amount)
+        
+        tp_price, sl_price = RiskManager.calculate_tp_sl(price, atr, settings.TRADING_MODE, trend_strength)
+        
+        await RiskManager.save_position(symbol, price, amount, "buy", tp_price, sl_price, 
+            entry_time=datetime.datetime.now().timestamp())
+        
+        size_msg = f"Size: ${pos_size_usd:.2f}" if reduction == 1.0 else f"Size: ${pos_size_usd:.2f} (50% reduced)"
+        logger.info(f"LIVE TRADE EXECUTED: Buy {symbol} at {price} | {size_msg} | SL: {sl_price:.2f} | TP: {tp_price:.2f}")
+        await TelegramService.send_message(f"🚨 <b>Trade Entry: {symbol}</b>\nScore: {result['score']}/10\nPrice: {price}\nReason: {result['reason']}\n{size_msg}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Order placement failed for {symbol}: {e}")
+        return False
+    finally:
+        await executor.close_connection()
+
+
+# Keep legacy function for backward compatibility
 async def analyze_symbol(symbol: str, is_demo: bool | None = None):
     """
     Main orchestration for symbol analysis and trade execution.
@@ -198,6 +403,9 @@ async def analyze_symbol(symbol: str, is_demo: bool | None = None):
             logger.info(f"Downtrend detected for {symbol}. Skipping trade.")
             return
         
+        # Calculate trend strength for scoring adjustment
+        trend_strength = TechnicalAnalysis.calculate_trend_strength(closes, highs)
+        
         fib_levels = TechnicalAnalysis.calculate_fibonacci_levels(max(highs), min(lows))
         fib_level_hit = TechnicalAnalysis.is_price_at_fib_level(price, fib_levels, settings.FIB_TOLERANCE)
         ema_20 = TechnicalAnalysis.calculate_ema(highs, period=20, symbol=symbol)
@@ -222,7 +430,7 @@ async def analyze_symbol(symbol: str, is_demo: bool | None = None):
         fib_level = fib_level_hit if fib_level_hit else ""
         score = _calculate_institutional_score(
             symbol, price, ema_20, fib_level, sentiment_score, 
-            prev_sentiment, volume_spike, bos, elliott_phase
+            prev_sentiment, volume_spike, bos, elliott_phase, trend_strength
         )
         score = min(score, 10)
         score_jump = score - prev_score
@@ -235,12 +443,19 @@ async def analyze_symbol(symbol: str, is_demo: bool | None = None):
         should_trade = False
         required_score = 5 if settings.FAST_TRADE_MODE else 7
         
-        if score >= required_score:
+        # Trade quality gate - trend must be strong enough
+        trend_gate_passed = trend_strength >= settings.MIN_TREND_STRENGTH
+        
+        if score >= required_score and trend_gate_passed:
             should_trade = True
-        elif score >= 6 and score_jump >= 3 and explosive_move:
+        elif score >= 6 and score_jump >= 3 and explosive_move and trend_gate_passed:
             should_trade = True
-        elif score_jump >= 3 and volume_spike and not bos and explosive_move:
+        elif score_jump >= 3 and volume_spike and not bos and explosive_move and trend_gate_passed:
             should_trade = True
+        
+        # Log why trade was rejected if trend is weak
+        if not should_trade and score >= required_score and not trend_gate_passed:
+            logger.info(f"Trade rejected: Weak trend strength ({trend_strength:.2f} < {settings.MIN_TREND_STRENGTH})")
 
         # 7. Persistence & WebUI
         analysis_data = {
@@ -260,22 +475,29 @@ async def analyze_symbol(symbol: str, is_demo: bool | None = None):
             await TelegramService.send_message(f"🚨 <b>Trade Entry: {symbol}</b>\nScore: {score}/10\nPrice: {price}")
             try:
                 balance = await executor.get_balance("USDT")
-                pos_size = RiskManager.calculate_position_size(balance)
                 
-                # Minimum notional check ($11)
-                if pos_size < 11 and balance >= 11:
-                    pos_size = 11.5
+                # Risk-based position sizing
+                pos_size_usd, stop_distance = RiskManager.calculate_position_size(
+                    balance, price, atr, 
+                    risk_percent=settings.RISK_PER_TRADE_PERCENT
+                )
                 
-                if balance < pos_size:
+                # Enforce minimum notional
+                if pos_size_usd < 11.5:
+                    pos_size_usd = 11.5
+                
+                if balance < pos_size_usd:
                     logger.error(f"Insufficient balance for {symbol}")
                     return
 
-                await executor.place_order(symbol, "buy", pos_size/price)
-                tp_price = price + (3.0 * atr) if atr > 0 else price * 1.05
-                sl_price = price - (1.5 * atr) if atr > 0 else price * 0.98
+                amount = pos_size_usd / price
+                await executor.place_order(symbol, "buy", amount)
                 
-                await RiskManager.save_position(symbol, price, pos_size/price, "buy", tp_price, sl_price, entry_time=datetime.datetime.now().timestamp())
-                logger.info(f"LIVE TRADE EXECUTED: Buy {symbol} at {price}")
+                # Get TP/SL based on trading mode AND trend strength
+                tp_price, sl_price = RiskManager.calculate_tp_sl(price, atr, settings.TRADING_MODE, trend_strength)
+                
+                await RiskManager.save_position(symbol, price, amount, "buy", tp_price, sl_price, entry_time=datetime.datetime.now().timestamp())
+                logger.info(f"LIVE TRADE EXECUTED: Buy {symbol} at {price} | Size: ${pos_size_usd:.2f} | SL: {sl_price:.2f} | TP: {tp_price:.2f}")
             except Exception as e:
                 logger.error(f"Order placement failed: {e}")
         else:

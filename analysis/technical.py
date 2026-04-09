@@ -122,6 +122,49 @@ class TechnicalAnalysis:
         elif current_price < ema * 0.98:  # 2% below EMA = downtrend
             return "downtrend"
         return "ranging"
+    
+    @staticmethod
+    def calculate_trend_strength(prices: list, highs: list = None, lows: list = None, period: int = 50) -> float:
+        """
+        Calculates trend strength score from 0-1.
+        Based on: price position + EMA slope + momentum + structure (higher highs)
+        """
+        if len(prices) < period:
+            return 0.3  # Default low confidence
+        
+        ema = TechnicalAnalysis.calculate_ema(prices, period)
+        current_price = prices[-1]
+        
+        # Price position relative to EMA (0-0.3)
+        position_score = 0.15
+        if ema > 0:
+            price_above_ema = (current_price - ema) / ema
+            position_score = min(0.3, max(-0.3, price_above_ema * 8)) + 0.15
+            position_score = max(0, position_score)
+        
+        # EMA slope (0-0.2)
+        slope_score = 0.1
+        recent_prices = prices[-10:]
+        if len(recent_prices) >= 10:
+            slope = (recent_prices[-1] - recent_prices[0]) / recent_prices[0]
+            slope_score = min(0.2, max(0, slope * 4))
+        
+        # Momentum (0-0.2)
+        momentum_score = 0.1
+        if len(prices) >= 5:
+            momentum = (prices[-1] - prices[-5]) / prices[-5]
+            momentum_score = min(0.2, max(0, momentum * 2.5))
+        
+        # Structure: higher highs (0-0.3)
+        structure_score = 0.15
+        if highs and len(highs) >= 10:
+            recent_highs = highs[-10:]
+            # Count how many higher highs in last 10 candles
+            higher_highs = sum(1 for i in range(1, len(recent_highs)) if recent_highs[i] > recent_highs[i-1])
+            structure_score = min(0.3, (higher_highs / 8) * 0.3)
+        
+        strength = position_score + slope_score + momentum_score + structure_score
+        return min(1.0, max(0.0, strength))
 
     @staticmethod
     def calculate_atr(highs: list, lows: list, closes: list, period: int = 14, symbol: str = "") -> float:

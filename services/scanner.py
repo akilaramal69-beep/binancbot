@@ -2,7 +2,7 @@ import asyncio
 import logging
 import time
 from core.config import settings
-from analysis.engine import analyze_symbol
+from analysis.engine import analyze_symbol_full, execute_trade
 from execution.manager import RiskManager
 from execution.executor import TradingExecutor
 from services.telegram import TelegramService
@@ -30,30 +30,117 @@ class MarketScanner:
             executor = await self._get_executor()
             
             try:
-                # Check exits (every 30s minimum)
                 current_time = time.time()
                 if current_time - self._last_position_check > 30:
                     await self.check_existing_positions(executor)
                     self._last_position_check = current_time
                 
-                # Scan all symbols in parallel
+                # Phase 1: Analyze all symbols
                 results = await asyncio.gather(*[
-                    analyze_symbol(symbol) for symbol in self.symbols
+                    analyze_symbol_full(symbol) for symbol in self.symbols
                 ], return_exceptions=True)
                 
-                # Track failures
-                failures = sum(1 for r in results if isinstance(r, Exception))
-                self._consecutive_failures = 0 if failures == 0 else self._consecutive_failures + 1
+                # Filter out exceptions and invalid results
+                candidates = []
+                for r in results:
+                    if isinstance(r, Exception):
+                        logger.error(f"Analysis error: {r}")
+                    elif isinstance(r, dict) and r.get("should_trade"):
+                        candidates.append(r)
                 
-                elapsed = time.time() - scan_start
-                logger.info(f"Scan complete in {elapsed:.2f}s. Sleeping for {settings.SCAN_INTERVAL_MINUTES} minutes...")
+                if candidates:
+                    # Phase 2: Rank candidates (normalized)
+                    # Normalize: score/10 + trend (0-1) + sentiment (0-1)
+                    ranked = sorted(candidates, key=lambda x: (
+                        (x["score"] / 10.0) * 2 +
+                        x["trend_strength"] * 3 +
+                        x["sentiment"] * 1
+                    ), reverse=True)
+                    
+                    # Dynamic opportunity cost filter
+                    # In strong trends, concentrate faster
+                    top_trend = ranked[0]["trend_strength"]
+                    threshold = 1.5 if top_trend > 0.8 else 2.0
+                    
+                    if len(ranked) >= 2:
+                        best_score = (ranked[0]["score"]/10)*2 + ranked[0]["trend_strength"]*3
+                        second_score = (ranked[1]["score"]/10)*2 + ranked[1]["trend_strength"]*3
+                        if best_score - second_score >= threshold:
+                            ranked = ranked[:1]
+                            logger.info(f"Opportunity filter: Taking only best ({threshold} threshold)")
+                    
+                    # Correlation filter - cluster-based allocation with confidence scaling
+                    # Clusters ensure diversified exposure across market narratives
+                    clusters = {
+                        "BTC_cluster": ["BTC", "ETH", "BNB", "XRP", "ADA"],
+                        "ALT_cluster": ["SOL", "AVAX", "DOT", "MATIC", "LINK"],
+                        "DEFIX_cluster": ["UNI", "AAVE", "MKR", "SNX"]
+                    }
+                    
+                    # Calculate best score for confidence scaling
+                    best_score = (ranked[0]["score"]/10*2) + ranked[0]["trend_strength"]*3 + ranked[0]["sentiment"]
+                    
+                    cluster_taken = {}
+                    filtered = []
+                    
+                    for trade in ranked:
+                        symbol = trade["symbol"]
+                        base = symbol.split("/")[0]
+                        
+                        # Find cluster
+                        found_cluster = None
+                        for cluster_name, members in clusters.items():
+                            if base in members:
+                                found_cluster = cluster_name
+                                break
+                        
+                        # Calculate rank score for scaling
+                        rank_score = (trade["score"]/10*2) + trade["trend_strength"]*3 + trade["sentiment"]
+                        
+                        # Cluster penalty - penalize crowded clusters
+                        if found_cluster and cluster_taken.get(found_cluster):
+                            # Penalize score by 10% for crowded cluster
+                            rank_score *= 0.9
+                            trade["cluster_penalized"] = True
+                            logger.info(f"Cluster penalty applied to {symbol}")
+                        
+                        # Confidence-based position scaling
+                        # Scale = min(1.0, rank_score / best_score)
+                        position_scale = min(1.0, rank_score / best_score) if best_score > 0 else 1.0
+                        trade["position_scale"] = position_scale
+                        
+                        # Set position reduction (for execute_trade)
+                        trade["position_reduction"] = position_scale
+                        
+                        if found_cluster:
+                            cluster_taken[found_cluster] = True
+                        
+                        filtered.append(trade)
+                    
+                    logger.info(f"Ranked: {len(ranked)}, Cluster diverse: {len(cluster_taken)}")
+                    
+                    # Phase 3: Execute top trades (up to remaining position slots)
+                    positions = RiskManager.load_positions()
+                    slots = settings.MAX_CONCURRENT_POSITIONS - len(positions)
+                    trades_to_take = filtered[:slots]
+                    executed_count = 0
+                    
+                    for trade in trades_to_take:
+                        logger.info(f"Taking trade: {trade['symbol']} (score: {trade['score']}, trend: {trade['trend_strength']:.2f})")
+                        success = await execute_trade(trade)
+                        if success:
+                            executed_count += 1
+                    
+                    logger.info(f"Scan complete in {time.time() - scan_start:.2f}s. Candidates: {len(candidates)}, Executed: {executed_count}")
+                else:
+                    logger.info(f"Scan complete in {time.time() - scan_start:.2f}s. No trade candidates.")
+                
                 await asyncio.sleep(self.interval)
                 
             except Exception as e:
                 self._consecutive_failures += 1
                 logger.error(f"Error in scanner loop: {e}")
                 
-                # Circuit breaker: pause on consecutive failures
                 if self._consecutive_failures >= 3:
                     logger.warning("Circuit breaker triggered - pausing scanner for 5 minutes")
                     await asyncio.sleep(300)
