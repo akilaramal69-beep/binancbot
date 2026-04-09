@@ -66,7 +66,7 @@ async function updateDashboard() {
                         <td class="symbol">${trade.symbol || 'Unknown'}</td>
                         <td>$${trade.entry_price.toLocaleString()}</td>
                         <td>$${trade.exit_price.toLocaleString()}</td>
-                        <td class="${trade.pnl >= 0 ? 'positive' : 'negative'}">${trade.pnl >= 0 ? '+' : ''}$${trade.pnl !== undefined ? Math.abs(trade.pnl).toFixed(2) : '0.00'}</td>
+                        <td class="${trade.pnl >= 0 ? 'positive' : 'negative'}">${trade.pnl >= 0 ? '+$' : '-$'}${trade.pnl !== undefined ? Math.abs(trade.pnl).toFixed(2) : '0.00'}</td>
                         <td><span class="badge" style="background: rgba(88, 166, 255, 0.1); color: #58a6ff; border: none;">${trade.exit_reason}</span></td>
                         <td style="color: var(--text-secondary); font-size: 0.875rem;">${trade.closed_at}</td>
                     </tr>

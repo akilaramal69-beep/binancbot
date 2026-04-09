@@ -1,11 +1,21 @@
 import logging
 import httpx
+import os
+import json
 from core.config import settings
 from execution.manager import RiskManager
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 logger = logging.getLogger("uvicorn")
+
+_http_client = None
+
+async def get_http_client():
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.AsyncClient(timeout=30.0)
+    return _http_client
 
 class TelegramService:
     @staticmethod
@@ -24,8 +34,8 @@ class TelegramService:
         }
         
         try:
-            async with httpx.AsyncClient() as client:
-                await client.post(url, json=payload)
+            client = await get_http_client()
+            await client.post(url, json=payload)
         except Exception as e:
             logger.error(f"Telegram send failed: {e}")
 

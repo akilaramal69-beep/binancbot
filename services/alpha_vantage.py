@@ -4,6 +4,14 @@ import logging
 
 logger = logging.getLogger("uvicorn")
 
+_http_client = None
+
+async def get_http_client():
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.AsyncClient(timeout=30.0)
+    return _http_client
+
 class AlphaVantageService:
     @staticmethod
     async def get_news_sentiment(symbol: str) -> float:
@@ -23,16 +31,15 @@ class AlphaVantageService:
         }
 
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(url, params=params)
-                data = response.json()
-                
-                if "feed" in data and len(data["feed"]) > 0:
-                    # Collect overall sentiment scores
-                    scores = [item.get("overall_sentiment_score", 0) for item in data["feed"]]
-                    avg_score = sum(scores) / len(scores)
-                    return avg_score
-                return 0.0
+            client = await get_http_client()
+            response = await client.get(url, params=params)
+            data = response.json()
+            
+            if "feed" in data and len(data["feed"]) > 0:
+                scores = [item.get("overall_sentiment_score", 0) for item in data["feed"]]
+                avg_score = sum(scores) / len(scores)
+                return avg_score
+            return 0.0
         except Exception as e:
             logger.error(f"Error fetching Alpha Vantage sentiment: {e}")
             return 0.0
@@ -56,15 +63,14 @@ class AlphaVantageService:
         }
 
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(url, params=params)
-                data = response.json()
-                
-                # AV returns data in "Technical Analysis: EMA" section with timestamps
-                if "Technical Analysis: EMA" in data:
-                    latest_timestamp = next(iter(data["Technical Analysis: EMA"]))
-                    return float(data["Technical Analysis: EMA"][latest_timestamp]["EMA"])
-                return 0.0
+            client = await get_http_client()
+            response = await client.get(url, params=params)
+            data = response.json()
+            
+            if "Technical Analysis: EMA" in data:
+                latest_timestamp = next(iter(data["Technical Analysis: EMA"]))
+                return float(data["Technical Analysis: EMA"][latest_timestamp]["EMA"])
+            return 0.0
         except Exception as e:
             logger.error(f"Error fetching Alpha Vantage EMA: {e}")
             return 0.0

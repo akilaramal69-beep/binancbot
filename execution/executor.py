@@ -1,6 +1,7 @@
 import ccxt.async_support as ccxt
 from core.config import settings
 import logging
+from typing import Optional
 
 logger = logging.getLogger("uvicorn")
 
@@ -11,6 +12,7 @@ class TradingExecutor:
             'apiKey': settings.EXCHANGE_API_KEY,
             'secret': settings.EXCHANGE_SECRET,
             'enableRateLimit': True,
+            'options': {'defaultType': 'spot'}
         })
         self.exchange.set_sandbox_mode(settings.USE_TESTNET)
         self.markets = None
@@ -20,43 +22,38 @@ class TradingExecutor:
             self.markets = await self.exchange.load_markets()
 
     def amount_to_precision(self, symbol: str, amount: float) -> str:
-        """
-        Truncates quantity to match LOT_SIZE requirements.
-        """
         return self.exchange.amount_to_precision(symbol, amount)
 
     def price_to_precision(self, symbol: str, price: float) -> str:
-        """
-        Truncates price to match PRICE_FILTER requirements.
-        """
         return self.exchange.price_to_precision(symbol, price)
 
-    async def get_balance(self, coin: str = "USDT"):
-        balance = await self.exchange.fetch_balance()
-        return balance['free'].get(coin, 0.0)
+    async def get_balance(self, coin: str = "USDT") -> float:
+        try:
+            balance = await self.exchange.fetch_balance()
+            return balance['free'].get(coin, 0.0)
+        except Exception as e:
+            logger.error(f"Error fetching balance: {e}")
+            return 0.0
 
-    async def fetch_ohlcv(self, symbol: str, timeframe: str = '1h', limit: int = 100):
-        """
-        Fetches OHLCV data from Binance.
-        """
+    async def fetch_ohlcv(self, symbol: str, timeframe: str = '1h', limit: int = 100) -> Optional[list]:
         try:
             return await self.exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
         except Exception as e:
             logger.error(f"Error fetching OHLCV for {symbol}: {e}")
             return None
 
-    async def get_latest_price(self, symbol: str):
-        ticker = await self.exchange.fetch_ticker(symbol)
-        return ticker['last']
+    async def get_latest_price(self, symbol: str) -> Optional[float]:
+        try:
+            ticker = await self.exchange.fetch_ticker(symbol)
+            return ticker['last']
+        except Exception as e:
+            logger.error(f"Error fetching ticker for {symbol}: {e}")
+            return None
 
-    async def place_order(self, symbol: str, side: str, amount: float, price: float = None):
-        """
-        Places a market or limit order with correct precision.
-        """
+    async def place_order(self, symbol: str, side: str, amount: float, price: Optional[float] = None) -> Optional[dict]:
         try:
             await self._ensure_markets()
             
-            # Truncate amount to match exchange precision (LOT_SIZE)
             formatted_amount = self.amount_to_precision(symbol, amount)
             
             if price:
@@ -72,4 +69,7 @@ class TradingExecutor:
             return None
 
     async def close_connection(self):
-        await self.exchange.close()
+        try:
+            await self.exchange.close()
+        except Exception as e:
+            logger.error(f"Error closing connection: {e}")

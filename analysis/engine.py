@@ -8,305 +8,266 @@ from core.config import settings
 import logging
 import os
 import json
+import tempfile
+import datetime
+import asyncio
 
 logger = logging.getLogger("uvicorn")
 
-async def analyze_symbol(symbol: str, is_demo: bool = None):
+def atomic_write_json(filepath, data):
     """
-    The 'Brain' of the bot. Proactively analyzes a symbol from Binance.
+    Safely writes to a JSON file atomically, preventing read collisions
+    from concurrent processes (e.g., Telegram status requests).
     """
-    is_demo_context = settings.USE_TESTNET or False
-    
-    # NEW: Check if we already have an open position for this symbol
-    positions = RiskManager.load_positions()
-    if symbol in positions:
-        logger.info(f"Already holding a position for {symbol}. Skipping scanner for new entries.")
-        return
+    dir_name = os.path.dirname(os.path.abspath(filepath))
+    with tempfile.NamedTemporaryFile('w', dir=dir_name, delete=False, suffix='.json') as tf:
+        json.dump(data, tf, indent=4)
+        tempname = tf.name
+    os.replace(tempname, filepath)
 
-    executor = TradingExecutor()
+async def _get_weighted_sentiment(symbol: str) -> float:
+    """ Fetches and weights sentiment from multiple sources. """
     try:
-        # 0. Fetch latest price
-        price = await executor.get_latest_price(symbol)
-        
-        logger.info(f"Proactive Analysis for {symbol} at {price}")
-        
-        await TelegramService.send_message(
-            f"🔍 <b>Market Scan Started</b>\n"
-            f"Symbol: {symbol}\n"
-            f"Price: {price}"
-        )
-        
-        # 1. Fundamental Analysis (Weighted Sentiment)
         ai_sentiment = await SentimentAnalysis.get_news_sentiment(symbol)
         av_sentiment = await AlphaVantageService.get_news_sentiment(symbol)
         
-        # Weighted Logic: 80% AI, 20% Alpha Vantage. 
-        # If AV is missing/0, use 100% AI.
         if av_sentiment == 0:
-            sentiment_score = ai_sentiment
+            sentiment = ai_sentiment
         else:
-            sentiment_score = (ai_sentiment * 0.8) + (av_sentiment * 0.2)
+            sentiment = (ai_sentiment * 0.8) + (av_sentiment * 0.2)
             
-        logger.info(f"Sentiment - AI: {ai_sentiment}, AV: {av_sentiment}, Weighted: {sentiment_score:.2f}")
+        logger.info(f"Sentiment for {symbol} - AI: {ai_sentiment}, AV: {av_sentiment}, Weighted: {sentiment:.2f}")
+        return sentiment
+    except Exception as e:
+        logger.warning(f"Sentiment calculation failed for {symbol}: {e}")
+        return 0.5 # Neutral fallback
 
-        # 2. Technical Analysis (Fibonacci)
-        # Handle exceptions internally to not break the main loop
-        fib_level_hit = None
-        try:
-            ohlcv = await executor.fetch_ohlcv(symbol, timeframe='1h', limit=50)
-            
-            if ohlcv:
-                highs = [candle[2] for candle in ohlcv]
-                lows = [candle[3] for candle in ohlcv]
-                actual_high = max(highs)
-                actual_low = min(lows)
-                fib_levels = TechnicalAnalysis.calculate_fibonacci_levels(actual_high, actual_low)
-                
-                # Use configurable tolerance for better sensitivity
-                fib_level_hit = TechnicalAnalysis.is_price_at_fib_level(
-                    price, fib_levels, tolerance=settings.FIB_TOLERANCE
-                )
-                
-                # Calculate EMA locally from Binance highs/lows or close prices
-                # For simplicity, we'll use the 'high' prices we already have
-                ema_20 = TechnicalAnalysis.calculate_ema(highs, period=20)
-                
-                logger.info(f"Fib Level Hit: {fib_level_hit}, Local EMA: {ema_20}")
-            else:
-                logger.warning(f"Failed to fetch OHLCV for {symbol}")
-        except Exception as e:
-            logger.error(f"Error in Fibonacci analysis: {e}")
+def _calculate_institutional_score(symbol: str, price: float, ema_20: float, fib_level_hit: str, 
+                                 sentiment_score: float, prev_sentiment: float, 
+                                 volume_spike: bool, bos: bool, elliott_phase: str) -> int:
+    """ Computes the 10-point institutional scoring matrix. """
+    score = 0
+    
+    # 1. Trend & Structure (Max 3)
+    if ema_20 > 0 and price > ema_20: score += 1
+    if bos: score += 1
+    if ema_20 > 0 and (price / ema_20) >= (1 + settings.MOMENTUM_EMA_GAP): score += 1
 
-        # 2.5 Alpha Vantage Technical Verification (REMOVED to save credits)
-        # We now use the local ema_20 calculated above
-        pass
+    # 2. Elliott Wave Bonus (Max 2)
+    if elliott_phase in ["Wave 5 Breakout", "Wave 5 Ignition"]:
+        score += 2
+    elif elliott_phase == "Wave 4 Retracement":
+        score += 1
 
-        # 2.75 Market Regime Check (Optional but recommended)
-        # Check if 24h volume change is healthy
-        try:
-            ticker = await executor.exchange.fetch_ticker(symbol)
-            vol_change = ticker.get('percentage', 0)
-            logger.info(f"24h Price Change: {vol_change}%")
-            # We avoid "falling knives" or completely dead markets
-            if vol_change < -15: # Extreme crash
-                 logger.warning(f"Market Regime: {symbol} is crashing too hard. Skipping.")
-                 return
-        except Exception as e:
-            logger.warning(f"Market Regime check failed for {symbol}: {e}")
+    # 3. Fibonacci & EMA Confluence (Max 3)
+    ema_match = False
+    ema_tolerance = 0.005 if settings.FAST_TRADE_MODE else 0.002
+    if ema_20 > 0 and abs(price - ema_20) / ema_20 < ema_tolerance: ema_match = True
 
-        # 3. Decision Logic - Institutional Scoring Matrix (0-10 Points)
-        score = 0
-        should_trade = False
-        side = "buy" 
-        
-        # Pull historical sentiment and score for dynamic acceleration
-        prev_sentiment = 0
-        prev_score = score
+    if fib_level_hit:
+        score += 1
+        if fib_level_hit in ["level_500", "level_618"]: score += 2
+    elif ema_match:
+        score += 2
+
+    # 4. Sentiment (Max 3)
+    if sentiment_score >= 0.70: score += 1
+    if sentiment_score >= 0.85: score += 1
+    if sentiment_score - prev_sentiment >= 0.10: score += 1
+
+    # 5. Volume (Max 1)
+    if volume_spike: score += 1
+    
+    return min(score, 10)
+
+def _check_explosive_confirmation(ohlcv: list, highs: list, atr: float, price: float) -> bool:
+    """ Validates candle quality to filter out fakeouts/wicks. """
+    if not ohlcv or len(highs) < 10: return False
+    
+    current_candle = ohlcv[-1]
+    c_open, c_high, c_low, c_close = current_candle[1:5]
+    candle_size = c_high - c_low
+    candle_body = abs(c_close - c_open)
+    
+    if candle_size <= 0: return False
+
+    # 1. Body Quality (No long upper wicks)
+    closes_near_high = (c_close - c_low) / candle_size >= 0.8
+    body_ratio = candle_body / candle_size
+    strong_candle = body_ratio >= 0.6
+    
+    # 2. Breakout Direction & FOMO Filter
+    recent_range_high = max(highs[-6:-1])
+    valid_direction = c_close > recent_range_high
+    
+    distance_from_range = (c_close - recent_range_high) / atr if atr > 0 else 0
+    fomo_safe = distance_from_range <= 0.5
+    
+    # 3. Volatility Expansion
+    volatility_expansion = candle_size > (1.5 * atr)
+    
+    return volatility_expansion and closes_near_high and strong_candle and valid_direction and fomo_safe
+
+def _save_analysis_data(symbol: str, data: dict):
+    """ Atomic save for WebUI cache and history. """
+    try:
         cache_file = "latest_analysis.json"
+        cache = {}
+        if os.path.exists(cache_file):
+            with open(cache_file, "r") as f:
+                cache = json.load(f)
         
-        try:
-            if os.path.exists(cache_file):
-                with open(cache_file, "r") as f:
-                    cache_data = json.load(f)
-                    symbol_data = cache_data.get(symbol, {})
-                    prev_sentiment = symbol_data.get("sentiment", sentiment_score)
-                    # Support parsing from the new schema
-                    prev_score = symbol_data.get("score", score)
-        except:
-            pass
-
-        # Calculate Advanced Indicators
-        atr = 0.0
-        volume_spike = False
-        bos = False
-        elliott_phase = "None"
-        if ohlcv:
-            closes = [candle[4] for candle in ohlcv]
-            volumes = [candle[5] for candle in ohlcv]
-            atr = TechnicalAnalysis.calculate_atr(highs, lows, closes)
-            volume_spike = TechnicalAnalysis.is_volume_spike(volumes)
-            bos = TechnicalAnalysis.detect_bos(highs, lows, price)
-            elliott_phase = TechnicalAnalysis.identify_elliott_wave(closes)
-            
-        ema_match = False
-        ema_tolerance = 0.005 if settings.FAST_TRADE_MODE else 0.002
-        if ema_20 > 0 and abs(price - ema_20) / ema_20 < ema_tolerance: ema_match = True
-
-        # SCORING - TREND & STRUCTURE (Max 3)
-        if ema_20 > 0 and price > ema_20: score += 1
-        if bos: score += 1
-        if ema_20 > 0 and (price / ema_20) >= (1 + settings.MOMENTUM_EMA_GAP): score += 1
-
-        # SCORING - ELLIOTT WAVE BONUS
-        if elliott_phase in ["Wave 5 Breakout", "Wave 5 Ignition"]:
-            score += 2 # Explosive structural momentum
-        elif elliott_phase == "Wave 4 Retracement":
-            score += 1 # High probability accumulation zone
-
-        # SCORING - FIBONACCI (Max 3)
-        if fib_level_hit:
-            score += 1
-            if fib_level_hit in ["level_500", "level_618"]: score += 2 # Golden Zone
-        elif ema_match:
-            score += 2 # High confluence standard
-
-        # SCORING - SENTIMENT (Max 3)
-        if sentiment_score >= 0.70: score += 1
-        if sentiment_score >= 0.85: score += 1
-        if sentiment_score - prev_sentiment >= 0.10: score += 1 # Acceleration
-
-        # SCORING - VOLUME (Max 1)
-        if volume_spike: score += 1
+        cache[symbol] = data
+        atomic_write_json(cache_file, cache)
         
-        score_jump = score - prev_score
-        logger.info(f"Institutional Score {symbol}: {score}/10 (Jump: {score_jump}) | Vol: {volume_spike} | BOS: {bos} | EW: {elliott_phase}")
-
-        # Candle Structure Confirmation (Filter Fakeouts/Long Wicks)
-        explosive_move = False
-        if ohlcv:
-            current_candle = ohlcv[-1]
-            c_open, c_high, c_low, c_close = current_candle[1:5]
+        history_file = "analysis_history.json"
+        history = []
+        if os.path.exists(history_file):
+            with open(history_file, "r") as f:
+                history = json.load(f)
+        
+        entry = data.copy()
+        entry["symbol"] = symbol
+        history.append(entry)
+        
+        if len(history) > 100:
+            history = history[-100:]
             
-            candle_size = c_high - c_low
-            candle_body = abs(c_close - c_open)
-            
-            # Strict Quality Filters
-            closes_near_high = False
-            strong_candle = False
-            valid_break_direction = False
-            
-            if candle_size > 0:
-                # 1. Close must be near the high to prevent massive upper wicks
-                closes_near_high = (c_close - c_low) / candle_size >= 0.8
-                # 2. Buyers must control the candle heavily (Big Body)
-                body_ratio = candle_body / candle_size
-                strong_candle = body_ratio >= 0.6
-                
-            # 3. Ensure we aren't just bouncing inside market noise (Breakout Direction)
-            if len(highs) > 5:
-                recent_range_high = max(highs[-6:-1]) # Exclude current candle
-                if c_close > recent_range_high:
-                    # FOMO Filter: Prevent chasing candles that have already run too far
-                    distance_from_range = (c_close - recent_range_high) / atr if atr > 0 else 0
-                    if distance_from_range <= 0.5:
-                        valid_break_direction = True
-                
-            # Combine Volatility (ATR) and Structure
-            if candle_size > (1.5 * atr) and closes_near_high and strong_candle and valid_break_direction:
-                explosive_move = True
-
-        # Core Entry Triggers
-        required_score = 5 if settings.FAST_TRADE_MODE else 7
-        if score >= required_score:
-            should_trade = True
-            logger.info(f"🔥 SCORE ENTRY TRIGGERED: {symbol} at Score {score} (Jump: {score_jump})!")
-        elif score >= 6 and score_jump >= 3:
-            if explosive_move:
-                should_trade = True
-                logger.info(f"🚀 EXPLOSIVE ACCELERATION TRIGGERED: {symbol} Score {score} (Jump: {score_jump}) + Solid Strong Candle!")
-            else:
-                logger.info(f"⚠️ Acceleration Detected but weak candle structure/wicking for {symbol}. Waiting for confirmation.")
-        elif score_jump >= 3 and volume_spike and not bos:
-            # Pre-BOS Expansion (Early Ignition)
-            if explosive_move:
-                should_trade = True
-                logger.info(f"💥 PRE-BOS IGNITION TRIGGERED: {symbol} Score {score} (Jump: {score_jump}) + Vol Spike + ATR Expansion!")
-            else:
-                logger.info(f"⏱️ Early expansion probed for {symbol}, but candle structure insufficient.")
-
-        # 4. Cache Analysis for WebUI
-        try:
-            cache_file = "latest_analysis.json"
-            cache = {}
-            if os.path.exists(cache_file):
-                with open(cache_file, "r") as f:
-                    cache = json.load(f)
-            
-            timestamp_str = str(logging.Formatter().formatTime(logging.LogRecord("", 0, "", 0, "", (), None)))
-            
-            cache_data = {
-                "price": price,
-                "sentiment": sentiment_score,
-                "fib_level": fib_level_hit,
-                "ema": ema_20,
-                "timestamp": timestamp_str,
-                "score": score,
-                "elliott_phase": elliott_phase,
-                "signal": f"BUY ({score}/10)" if should_trade else f"WATCH ({score}/10)"
-            }
-            cache[symbol] = cache_data
-            with open(cache_file, "w") as f:
-                json.dump(cache, f, indent=4)
-                
-            # Keep a rolling history of the last 50 scans
-            history_file = "analysis_history.json"
-            history_list = []
-            if os.path.exists(history_file):
-                with open(history_file, "r") as f:
-                    history_list = json.load(f)
-            
-            history_entry = cache_data.copy()
-            history_entry["symbol"] = symbol
-            history_list.append(history_entry)
-            
-            if len(history_list) > 50:
-                history_list = history_list[-50:]
-                
-            with open(history_file, "w") as f:
-                json.dump(history_list, f, indent=4)
-                
-            # Update Total Scans Counter
-            total_scans_file = "total_scans.json"
-            total_scans = 0
-            if os.path.exists(total_scans_file):
-                try:
-                    with open(total_scans_file, "r") as f:
-                        total_scans = json.load(f).get("count", 0)
-                except:
-                    pass
-            with open(total_scans_file, "w") as f:
-                json.dump({"count": total_scans + 1}, f)
-                
-        except Exception as e:
-            logger.warning(f"Failed to cache analysis for {symbol}: {e}")
-
-        if should_trade:
-            summary_msg = f"✅ <b>Independent Trade Triggered</b> for {symbol}\n" \
-                        f"Sentiment: {sentiment_score:.2f}\n" \
-                        f"Fib Level: {fib_level_hit}"
-            await TelegramService.send_message(summary_msg)
-
-            if settings.USE_TESTNET:
-                logger.info(f"TESTNET EXECUTION for {symbol}")
-            
+        atomic_write_json(history_file, history)
+        
+        # Update Total Scans
+        total_scans_file = "total_scans.json"
+        total_scans = 0
+        if os.path.exists(total_scans_file):
             try:
-                balance = await executor.get_balance("USDT")
-                position_size = RiskManager.calculate_position_size(balance)
-                
-                # Place actual Buy Order
-                await executor.place_order(symbol, side, position_size/price)
-                logger.info(f"EXECUTING LIVE TRADE: {side} {symbol} size: {position_size}")
-                
-                # Calculate ATR-Based TP/SL if available
-                if atr > 0:
-                    tp_price = price + (3.0 * atr)
-                    sl_price = price - (1.5 * atr)
-                    logger.info(f"Risk Params using ATR Volatility -> SL: {sl_price:.2f}, TP: {tp_price:.2f}")
-                else:
-                    extensions = TechnicalAnalysis.calculate_fibonacci_extensions(actual_high, actual_low)
-                    tp_price = extensions.get("level_1272", price * 1.05)
-                    sl_price = price * 0.98
-
-                # Save the position for tracking
-                RiskManager.save_position(symbol, price, position_size/price, side, tp_price=tp_price, sl_price=sl_price)
-                
-                await TelegramService.send_message(f"🚀 <b>Live Trade Executed</b>\n{side} {symbol} ${position_size:.2f}")
-            except Exception as e:
-                logger.error(f"Execution failed: {e}")
-        else:
-            logger.info(f"No trade for {symbol}")
+                with open(total_scans_file, "r") as f:
+                    total_scans = json.load(f).get("count", 0)
+            except: pass
+        with open(total_scans_file, "w") as f:
+            json.dump({"count": total_scans + 1}, f)
             
     except Exception as e:
-        logger.error(f"Critical error in analyze_symbol for {symbol}: {e}")
+        logger.warning(f"Failed to save analysis for {symbol}: {e}")
+
+async def analyze_symbol(symbol: str, is_demo: bool | None = None):
+    """
+    Main orchestration for symbol analysis and trade execution.
+    """
+    if symbol in RiskManager.load_positions():
+        logger.info(f"Already holding {symbol}. Skipping scanner.")
+        return
+
+    executor = TradingExecutor()
+    
+    price = None
+    sentiment_score = 0.5
+    ohlcv = None
+    
+    try:
+        price = await executor.get_latest_price(symbol)
+        if not price:
+            logger.warning(f"No price data for {symbol}")
+            return
+        logger.info(f"--- Analyzing {symbol} at {price} ---")
+        
+        # Fetch sentiment and OHLCV in parallel
+        sentiment_task = _get_weighted_sentiment(symbol)
+        ohlcv_task = executor.fetch_ohlcv(symbol, timeframe='1h', limit=50)
+        sentiment_score, ohlcv = await asyncio.gather(sentiment_task, ohlcv_task)
+        
+        if not ohlcv:
+            logger.warning(f"No OHLCV for {symbol}")
+            return
+            
+        highs = [c[2] for c in ohlcv]
+        lows = [c[3] for c in ohlcv]
+        closes = [c[4] for c in ohlcv]
+        volumes = [c[5] for c in ohlcv]
+        
+        fib_levels = TechnicalAnalysis.calculate_fibonacci_levels(max(highs), min(lows))
+        fib_level_hit = TechnicalAnalysis.is_price_at_fib_level(price, fib_levels, settings.FIB_TOLERANCE)
+        ema_20 = TechnicalAnalysis.calculate_ema(highs, period=20)
+        atr = TechnicalAnalysis.calculate_atr(highs, lows, closes)
+        volume_spike = TechnicalAnalysis.is_volume_spike(volumes)
+        bos = TechnicalAnalysis.detect_bos(highs, lows, price)
+        elliott_phase = TechnicalAnalysis.identify_elliott_wave(closes)
+
+        # 3. Dynamic Acceleration Stats
+        prev_sentiment = sentiment_score
+        prev_score = 0
+        if os.path.exists("latest_analysis.json"):
+            try:
+                with open("latest_analysis.json", "r") as f:
+                    cache = json.load(f)
+                    s_data = cache.get(symbol, {})
+                    prev_sentiment = s_data.get("sentiment", sentiment_score)
+                    prev_score = s_data.get("score", 0)
+            except: pass
+
+        # 4. Final Scoring
+        fib_level = fib_level_hit if fib_level_hit else ""
+        score = _calculate_institutional_score(
+            symbol, price, ema_20, fib_level, sentiment_score, 
+            prev_sentiment, volume_spike, bos, elliott_phase
+        )
+        score = min(score, 10)
+        score_jump = score - prev_score
+        logger.info(f"Institutional Score {symbol}: {score}/10 (Jump: {score_jump}) | EW: {elliott_phase}")
+
+        # 5. Explosive Move Validation
+        explosive_move = _check_explosive_confirmation(ohlcv, highs, atr, price)
+        
+        # 6. Trade Decision
+        should_trade = False
+        required_score = 5 if settings.FAST_TRADE_MODE else 7
+        
+        if score >= required_score:
+            should_trade = True
+        elif score >= 6 and score_jump >= 3 and explosive_move:
+            should_trade = True
+        elif score_jump >= 3 and volume_spike and not bos and explosive_move:
+            should_trade = True
+
+        # 7. Persistence & WebUI
+        analysis_data = {
+            "price": price,
+            "sentiment": sentiment_score,
+            "fib_level": fib_level_hit,
+            "ema": ema_20,
+            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "score": score,
+            "elliott_phase": elliott_phase,
+            "signal": f"BUY ({score}/10)" if should_trade else f"WATCH ({score}/10)"
+        }
+        _save_analysis_data(symbol, analysis_data)
+
+        # 8. Execution
+        if should_trade:
+            await TelegramService.send_message(f"🚨 <b>Trade Entry: {symbol}</b>\nScore: {score}/10\nPrice: {price}")
+            try:
+                balance = await executor.get_balance("USDT")
+                pos_size = RiskManager.calculate_position_size(balance)
+                
+                # Minimum notional check ($11)
+                if pos_size < 11 and balance >= 11:
+                    pos_size = 11.5
+                
+                if balance < pos_size:
+                    logger.error(f"Insufficient balance for {symbol}")
+                    return
+
+                await executor.place_order(symbol, "buy", pos_size/price)
+                tp_price = price + (3.0 * atr) if atr > 0 else price * 1.05
+                sl_price = price - (1.5 * atr) if atr > 0 else price * 0.98
+                
+                await RiskManager.save_position(symbol, price, pos_size/price, "buy", tp_price, sl_price, entry_time=datetime.datetime.now().timestamp())
+                logger.info(f"LIVE TRADE EXECUTED: Buy {symbol} at {price}")
+            except Exception as e:
+                logger.error(f"Order placement failed: {e}")
+        else:
+            logger.info(f"No trade for {symbol}")
+
+    except Exception as e:
+        logger.error(f"Critical error in analyze_symbol: {e}")
     finally:
         await executor.close_connection()

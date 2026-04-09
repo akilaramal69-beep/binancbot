@@ -1,11 +1,14 @@
 import logging
 import json
 import os
+import asyncio
+import datetime
 
 logger = logging.getLogger("uvicorn")
 
 POSITIONS_FILE = "positions.json"
 HISTORY_FILE = "history.json"
+_file_lock = asyncio.Lock()
 
 class RiskManager:
     @staticmethod
@@ -19,14 +22,14 @@ class RiskManager:
         return size
 
     @staticmethod
-    def save_position(symbol: str, entry_price: float, amount: float, side: str, tp_price: float = None, sl_price: float = None):
+    async def save_position(symbol: str, entry_price: float, amount: float, side: str, tp_price: float = 0.0, sl_price: float = 0.0, entry_time: float = 0.0):
         """
         Persists an open position with TP and Trailing SL.
         """
         positions = RiskManager.load_positions()
         
-        final_tp = tp_price if tp_price else entry_price * 1.05
-        final_sl = sl_price if sl_price else entry_price * 0.98
+        final_tp = tp_price if tp_price is not None and tp_price > 0 else entry_price * 1.05
+        final_sl = sl_price if sl_price is not None and sl_price > 0 else entry_price * 0.98
         
         positions[symbol] = {
             "entry_price": entry_price,
@@ -37,10 +40,12 @@ class RiskManager:
             "sl_price": final_sl,
             "original_sl": final_sl,
             "breakeven": False,
-            "scaled_out": False
+            "scaled_out": False,
+            "opened_at": entry_time
         }
-        with open(POSITIONS_FILE, "w") as f:
-            json.dump(positions, f, indent=4)
+        async with _file_lock:
+            with open(POSITIONS_FILE, "w") as f:
+                json.dump(positions, f, indent=4)
         logger.info(f"Position saved for {symbol} at {entry_price}")
 
     @staticmethod
@@ -57,7 +62,7 @@ class RiskManager:
             return {}
 
     @staticmethod
-    def remove_position(symbol: str, exit_price: float = 0, reason: str = "Unknown"):
+    async def remove_position(symbol: str, exit_price: float = 0, reason: str = "Unknown"):
         """
         Removes a closed position and archives it to the history file.
         """
@@ -67,23 +72,23 @@ class RiskManager:
             closed_pos["symbol"] = symbol
             closed_pos["exit_price"] = exit_price
             closed_pos["exit_reason"] = reason
-            closed_pos["closed_at"] = str(logging.Formatter().formatTime(logging.LogRecord("", 0, "", 0, "", (), None)))
+            closed_pos["closed_at"] = datetime.datetime.now().isoformat()
             
             pnl = (exit_price - closed_pos["entry_price"]) * closed_pos["amount"]
             if closed_pos["side"] == "sell":
                 pnl = -pnl
             closed_pos["pnl"] = pnl
             
-            # Save to History
-            RiskManager.archive_to_history(closed_pos)
+            await RiskManager.archive_to_history(closed_pos)
             
             del positions[symbol]
-            with open(POSITIONS_FILE, "w") as f:
-                json.dump(positions, f, indent=4)
+            async with _file_lock:
+                with open(POSITIONS_FILE, "w") as f:
+                    json.dump(positions, f, indent=4)
             logger.info(f"Position removed and archived for {symbol}")
 
     @staticmethod
-    def archive_to_history(data: dict):
+    async def archive_to_history(data: dict):
         """
         Appends historical trade data to history.json.
         """
@@ -96,11 +101,12 @@ class RiskManager:
                 history = []
         
         history.append(data)
-        with open(HISTORY_FILE, "w") as f:
-            json.dump(history, f, indent=4)
+        async with _file_lock:
+            with open(HISTORY_FILE, "w") as f:
+                json.dump(history, f, indent=4)
 
     @staticmethod
-    def update_trailing_stop(symbol: str, current_price: float):
+    async def update_trailing_stop(symbol: str, current_price: float):
         """
         Updates the highest price seen to move the trailing stop-loss up.
         """
@@ -109,25 +115,26 @@ class RiskManager:
             pos = positions[symbol]
             if current_price > pos["highest_price"]:
                 pos["highest_price"] = current_price
-                # Keep SL 2% below highest price
                 new_sl = current_price * 0.98
                 if new_sl > pos["sl_price"]:
                     pos["sl_price"] = new_sl
                     logger.info(f"Trailing SL moved up for {symbol} to {new_sl}")
                 
-            with open(POSITIONS_FILE, "w") as f:
-                json.dump(positions, f, indent=4)
+            async with _file_lock:
+                with open(POSITIONS_FILE, "w") as f:
+                    json.dump(positions, f, indent=4)
 
     @staticmethod
-    def update_position_data(symbol: str, data: dict):
+    async def update_position_data(symbol: str, data: dict):
         """
         Updates arbitrary keys for a given position.
         """
         positions = RiskManager.load_positions()
         if symbol in positions:
             positions[symbol].update(data)
-            with open(POSITIONS_FILE, "w") as f:
-                json.dump(positions, f, indent=4)
+            async with _file_lock:
+                with open(POSITIONS_FILE, "w") as f:
+                    json.dump(positions, f, indent=4)
 
     @staticmethod
     def get_stop_loss_price(entry_price: float, side: str, stop_loss_percent: float = 0.02) -> float:

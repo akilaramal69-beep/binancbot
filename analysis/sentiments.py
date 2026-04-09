@@ -1,4 +1,6 @@
 import httpx
+import openai
+import re
 from core.config import settings
 import logging
 
@@ -12,18 +14,14 @@ class SentimentAnalysis:
         Returns a score between -1 (Bearish) and 1 (Bullish).
         """
         try:
-            # For demonstration, we'll fetch mock news or 
-            # actually call CryptoPanic if an API key is provided
             news_data = await SentimentAnalysis._fetch_news(symbol)
             
             if not settings.OPENAI_API_KEY and not settings.GROQ_API_KEY:
                 logger.warning("No AI API key found. Skipping sentiment analysis.")
                 return 0.0
             
-            # Combine news into a prompt
             prompt = f"Analyze the sentiment of the following news for {symbol}. Return ONLY a number between -1 and 1.\n\nNews:\n{news_data}"
             
-            # Use Groq if available, else OpenAI
             if settings.GROQ_API_KEY:
                 return await SentimentAnalysis._call_groq(prompt)
             else:
@@ -35,20 +33,18 @@ class SentimentAnalysis:
 
     @staticmethod
     async def _fetch_news(symbol: str) -> str:
-        # Placeholder for real news fetching logic
-        # Could use NewsAPI or CryptoPanic
         return f"Bullish progress for {symbol} as adoption grows. Regulators showing positive interest."
 
     @staticmethod
     async def _call_openai(prompt: str) -> float:
-        # Simple OpenAI integration
-        import openai
         client = openai.AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
         response = await client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}]
         )
-        return float(response.choices[0].message.content.strip())
+        content = response.choices[0].message.content.strip()
+        match = re.search(r"(-?\d+(\.\d+)?)", content)
+        return float(match.group(1)) if match else 0.0
 
     @staticmethod
     async def _call_groq(prompt: str) -> float:
@@ -67,7 +63,7 @@ class SentimentAnalysis:
         }
 
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(url, json=payload, headers=headers)
                 if response.status_code != 200:
                     logger.error(f"Groq API Error: Status {response.status_code}, Response: {response.text}")
@@ -76,8 +72,6 @@ class SentimentAnalysis:
                 data = response.json()
                 content = data["choices"][0]["message"]["content"].strip()
                 
-                # Extract the numeric sentiment value
-                import re
                 match = re.search(r"(-?\d+(\.\d+)?)", content)
                 if match:
                     return float(match.group(1))
