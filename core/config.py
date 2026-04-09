@@ -36,6 +36,15 @@ class Settings(BaseSettings):
     MOMENTUM_SENTIMENT_THRESHOLD: float = 0.92
     MOMENTUM_EMA_GAP: float = 0.01 # 1% above EMA
     FAST_TRADE_MODE: bool = False # Lowers the score threshold to 5 and widens EMA tolerance
+    
+    # Risk Management
+    MAX_CONCURRENT_POSITIONS: int = 3
+    MAX_HOLDING_HOURS: int = 24
+    MARKET_REGIME_EMA_PERIOD: int = 200 # EMA for trend detection
+    
+    # Performance
+    INDICATOR_CACHE_TTL: int = 30
+    API_TIMEOUT_SECONDS: int = 10
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

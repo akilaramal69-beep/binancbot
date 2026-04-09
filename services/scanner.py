@@ -89,7 +89,16 @@ class MarketScanner:
             opened_at = pos.get("opened_at", 0)
             if now - opened_at < 60:
                 continue
-
+            
+            # Max holding time check
+            max_hold_seconds = settings.MAX_HOLDING_HOURS * 3600
+            time_based_exit = False
+            time_reason = ""
+            if now - opened_at > max_hold_seconds:
+                logger.info(f"Max holding time reached for {symbol}. Closing position.")
+                time_based_exit = True
+                time_reason = f"Max Hold Time ({settings.MAX_HOLDING_HOURS}h) 🚪"
+            
             await RiskManager.update_trailing_stop(symbol, current_price)
             
             updated_pos = RiskManager.load_positions().get(symbol, pos)
@@ -102,29 +111,33 @@ class MarketScanner:
             level1 = entry_price + (target_distance * 0.5)
             level2 = entry_price + (target_distance * 0.9)
 
-            if target_distance > 0 and current_price >= level1 and not updated_pos.get("breakeven"):
-                new_sl = max(sl_price, entry_price * 1.002)
-                await RiskManager.update_position_data(symbol, {"breakeven": True, "sl_price": new_sl})
-                await TelegramService.send_message(f"🛡️ <b>True Breakeven Activated</b> for {symbol}\nPrice reached 50% of target. Stop Loss secured at ${new_sl:.2f} (Covers Fees).")
+            if not time_based_exit:
+                if target_distance > 0 and current_price >= level1 and not updated_pos.get("breakeven"):
+                    new_sl = max(sl_price, entry_price * 1.002)
+                    await RiskManager.update_position_data(symbol, {"breakeven": True, "sl_price": new_sl})
+                    await TelegramService.send_message(f"🛡️ <b>True Breakeven Activated</b> for {symbol}\nPrice reached 50% of target. Stop Loss secured at ${new_sl:.2f} (Covers Fees).")
 
-            if target_distance > 0 and current_price >= level2 and not updated_pos.get("scaled_out"):
-                half_amount = amount * 0.5
-                if half_amount * current_price >= 11:
-                    logger.info(f"Selling 50% of {symbol} at Level 2...")
-                    await executor.place_order(symbol, "sell", half_amount)
-                    await RiskManager.update_position_data(symbol, {
-                        "scaled_out": True, 
-                        "amount": amount - half_amount,
-                        "sl_price": current_price * 0.98
-                    })
-                    await TelegramService.send_message(f"🎯 <b>Level 2 Profit (50%)</b> for {symbol}\nSecured 50% profit, letting the rest run.")
+                if target_distance > 0 and current_price >= level2 and not updated_pos.get("scaled_out"):
+                    half_amount = amount * 0.5
+                    if half_amount * current_price >= 11:
+                        logger.info(f"Selling 50% of {symbol} at Level 2...")
+                        await executor.place_order(symbol, "sell", half_amount)
+                        await RiskManager.update_position_data(symbol, {
+                            "scaled_out": True, 
+                            "amount": amount - half_amount,
+                            "sl_price": current_price * 0.98
+                        })
+                        await TelegramService.send_message(f"🎯 <b>Level 2 Profit (50%)</b> for {symbol}\nSecured 50% profit, letting the rest run.")
 
-            sl_price = RiskManager.load_positions().get(symbol, {}).get("sl_price", sl_price)
+                sl_price = RiskManager.load_positions().get(symbol, {}).get("sl_price", sl_price)
 
             should_exit = False
             reason = ""
             
-            if current_price >= tp_price:
+            if time_based_exit:
+                should_exit = True
+                reason = time_reason
+            elif current_price >= tp_price:
                 should_exit = True
                 reason = "Take Profit Hit 🎯"
             elif current_price <= sl_price:

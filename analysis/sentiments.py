@@ -1,10 +1,13 @@
 import httpx
 import openai
 import re
+import asyncio
 from core.config import settings
 import logging
 
 logger = logging.getLogger("uvicorn")
+
+TIMEOUT = asyncio.timeout(10)  # 10 second timeout
 
 class SentimentAnalysis:
     @staticmethod
@@ -14,19 +17,23 @@ class SentimentAnalysis:
         Returns a score between -1 (Bearish) and 1 (Bullish).
         """
         try:
-            news_data = await SentimentAnalysis._fetch_news(symbol)
-            
-            if not settings.OPENAI_API_KEY and not settings.GROQ_API_KEY:
-                logger.warning("No AI API key found. Skipping sentiment analysis.")
-                return 0.0
-            
-            prompt = f"Analyze the sentiment of the following news for {symbol}. Return ONLY a number between -1 and 1.\n\nNews:\n{news_data}"
-            
-            if settings.GROQ_API_KEY:
-                return await SentimentAnalysis._call_groq(prompt)
-            else:
-                return await SentimentAnalysis._call_openai(prompt)
+            async with asyncio.timeout(settings.API_TIMEOUT_SECONDS):
+                news_data = await SentimentAnalysis._fetch_news(symbol)
                 
+                if not settings.OPENAI_API_KEY and not settings.GROQ_API_KEY:
+                    logger.warning("No AI API key found. Skipping sentiment analysis.")
+                    return 0.0
+                
+                prompt = f"Analyze the sentiment of the following news for {symbol}. Return ONLY a number between -1 and 1.\n\nNews:\n{news_data}"
+                
+                if settings.GROQ_API_KEY:
+                    return await SentimentAnalysis._call_groq(prompt)
+                else:
+                    return await SentimentAnalysis._call_openai(prompt)
+                    
+        except asyncio.TimeoutError:
+            logger.warning(f"Sentiment analysis timeout for {symbol}")
+            return 0.5  # Neutral fallback
         except Exception as e:
             logger.error(f"Error in sentiment analysis: {e}")
             return 0.0

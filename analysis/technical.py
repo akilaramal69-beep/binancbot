@@ -2,6 +2,21 @@ import pandas as pd
 import numpy as np
 from scipy.signal import argrelextrema
 from typing import Optional
+import time
+
+# Simple in-memory cache for indicators
+_indicator_cache = {}
+_CACHE_TTL = 30  # seconds
+
+def _get_cached(key: str):
+    if key in _indicator_cache:
+        value, timestamp = _indicator_cache[key]
+        if time.time() - timestamp < _CACHE_TTL:
+            return value
+    return None
+
+def _set_cached(key: str, value):
+    _indicator_cache[key] = (value, time.time())
 
 class TechnicalAnalysis:
     @staticmethod
@@ -72,27 +87,67 @@ class TechnicalAnalysis:
         return float(rsi.iloc[-1]) if not pd.isna(rsi.iloc[-1]) else 50.0
 
     @staticmethod
-    def calculate_ema(prices, period: int = 20) -> float:
+    def calculate_ema(prices, period: int = 20, symbol: str = "") -> float:
         """
         Calculates Exponential Moving Average (EMA).
         """
         if len(prices) < period:
             return 0.0
         
-        return float(pd.Series(prices).ewm(span=period, adjust=False).mean().iloc[-1])
+        if symbol:
+            cache_key = f"ema_{symbol}_{period}"
+            cached = _get_cached(cache_key)
+            if cached is not None:
+                return cached
+        
+        result = float(pd.Series(prices).ewm(span=period, adjust=False).mean().iloc[-1])
+        
+        if symbol:
+            _set_cached(cache_key, result)
+        return result
+    
+    @staticmethod
+    def detect_market_regime(prices: list, period: int = 200) -> str:
+        """
+        Detects market regime: uptrend, downtrend, or ranging.
+        """
+        if len(prices) < period:
+            return "ranging"
+        
+        ema = TechnicalAnalysis.calculate_ema(prices, period)
+        current_price = prices[-1]
+        
+        if current_price > ema * 1.02:  # 2% above EMA = uptrend
+            return "uptrend"
+        elif current_price < ema * 0.98:  # 2% below EMA = downtrend
+            return "downtrend"
+        return "ranging"
 
     @staticmethod
-    def calculate_atr(highs: list, lows: list, closes: list, period: int = 14) -> float:
+    def calculate_atr(highs: list, lows: list, closes: list, period: int = 14, symbol: str = "") -> float:
         """ Calculates Average True Range (ATR) for volatility measurement. """
+        if symbol:
+            cache_key = f"atr_{symbol}_{period}"
+            cached = _get_cached(cache_key)
+            if cached is not None:
+                return cached
+        
         if len(highs) < period: return 0.0
-        df = pd.DataFrame({'high': highs, 'low': lows, 'close': closes})
-        df['tr1'] = df['high'] - df['low']
-        df['tr2'] = abs(df['high'] - df['close'].shift())
-        df['tr3'] = abs(df['low'] - df['close'].shift())
-        df['tr'] = df[['tr1', 'tr2', 'tr3']].max(axis=1)
-        atr = df['tr'].rolling(window=period).mean()
-        result = atr.iloc[-1]
-        return float(result) if not pd.isna(result) else 0.0
+        
+        high_s = pd.Series(highs)
+        low_s = pd.Series(lows)
+        close_s = pd.Series(closes)
+        
+        tr1 = high_s - low_s
+        tr2 = (high_s - close_s.shift()).abs()
+        tr3 = (low_s - close_s.shift()).abs()
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        atr = tr.rolling(window=period).mean()
+        result = float(atr.iloc[-1]) if not pd.isna(atr.iloc[-1]) else 0.0
+        
+        if symbol:
+            _set_cached(cache_key, result)
+        return result
 
     @staticmethod
     def is_volume_spike(volumes: list, period: int = 20, multiplier: float = 1.5) -> bool:
@@ -122,7 +177,7 @@ class TechnicalAnalysis:
         return False
         
     @staticmethod
-    def identify_elliott_wave(closes: list) -> str:
+    def identify_elliott_wave(closes: list, atr: float = 0) -> str:
         """
         Uses Scipy argrelextrema to identify local peaks and troughs 
         to validate short-term 5-wave motive sequences.
@@ -132,8 +187,10 @@ class TechnicalAnalysis:
         data = np.array(closes)
         smoothed = pd.Series(data).rolling(window=3).mean().dropna()
         
-        peaks = argrelextrema(smoothed.values, np.greater, order=2)[0]
-        troughs = argrelextrema(smoothed.values, np.less, order=2)[0]
+        # Use higher order for less noise, or ATR-based prominence
+        order = 3 if atr > 0 else 3
+        peaks = argrelextrema(smoothed.values, np.greater, order=order)[0]
+        troughs = argrelextrema(smoothed.values, np.less, order=order)[0]
         
         if len(peaks) < 2 or len(troughs) < 2:
             return "None"

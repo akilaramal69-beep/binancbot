@@ -153,7 +153,15 @@ async def analyze_symbol(symbol: str, is_demo: bool | None = None):
     """
     Main orchestration for symbol analysis and trade execution.
     """
-    if symbol in RiskManager.load_positions():
+    positions = RiskManager.load_positions()
+    
+    # Check position limit
+    if len(positions) >= settings.MAX_CONCURRENT_POSITIONS:
+        logger.info(f"Max positions ({settings.MAX_CONCURRENT_POSITIONS}) reached. Skipping {symbol}")
+        return
+    
+    # Check existing position
+    if symbol in positions:
         logger.info(f"Already holding {symbol}. Skipping scanner.")
         return
 
@@ -184,13 +192,19 @@ async def analyze_symbol(symbol: str, is_demo: bool | None = None):
         closes = [c[4] for c in ohlcv]
         volumes = [c[5] for c in ohlcv]
         
+        # Market regime filter - only trade in uptrends
+        market_regime = TechnicalAnalysis.detect_market_regime(closes, settings.MARKET_REGIME_EMA_PERIOD)
+        if market_regime == "downtrend":
+            logger.info(f"Downtrend detected for {symbol}. Skipping trade.")
+            return
+        
         fib_levels = TechnicalAnalysis.calculate_fibonacci_levels(max(highs), min(lows))
         fib_level_hit = TechnicalAnalysis.is_price_at_fib_level(price, fib_levels, settings.FIB_TOLERANCE)
-        ema_20 = TechnicalAnalysis.calculate_ema(highs, period=20)
-        atr = TechnicalAnalysis.calculate_atr(highs, lows, closes)
+        ema_20 = TechnicalAnalysis.calculate_ema(highs, period=20, symbol=symbol)
+        atr = TechnicalAnalysis.calculate_atr(highs, lows, closes, symbol=symbol)
         volume_spike = TechnicalAnalysis.is_volume_spike(volumes)
         bos = TechnicalAnalysis.detect_bos(highs, lows, price)
-        elliott_phase = TechnicalAnalysis.identify_elliott_wave(closes)
+        elliott_phase = TechnicalAnalysis.identify_elliott_wave(closes, atr)
 
         # 3. Dynamic Acceleration Stats
         prev_sentiment = sentiment_score
