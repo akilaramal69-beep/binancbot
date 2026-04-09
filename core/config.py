@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     SWING_TP_PERCENT: float = 0.10  # 10% take profit
     
     # Trade Quality Gate
-    MIN_TREND_STRENGTH: float = 0.6  # Minimum trend strength 0-1
+    MIN_TREND_STRENGTH: float = 0.4  # Minimum trend strength 0-1 (relaxed for testing)
     MIN_SETUP_QUALITY: int = 6  # Minimum score to allow trade
     
     # Trade Ranking

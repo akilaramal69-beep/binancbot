@@ -49,9 +49,6 @@ def _calculate_institutional_score(symbol: str, price: float, ema_20: float, fib
     """ Computes the 10-point institutional scoring matrix. """
     score = 0
     
-    # 0. Trend Strength Gate (if trend is weak, reduce score)
-    trend_multiplier = 1.0 if trend_strength >= settings.MIN_TREND_STRENGTH else 0.5
-    
     # 1. Trend & Structure (Max 3)
     if ema_20 > 0 and price > ema_20: score += 1
     if bos: score += 1
@@ -82,8 +79,11 @@ def _calculate_institutional_score(symbol: str, price: float, ema_20: float, fib
     # 5. Volume (Max 1)
     if volume_spike: score += 1
     
-    # Apply trend multiplier
-    score = int(score * trend_multiplier)
+    # Bonus: Trend strength adds up to +2 points for strong trends
+    if trend_strength >= 0.7:
+        score += 2
+    elif trend_strength >= 0.5:
+        score += 1
     
     return min(score, 10)
 

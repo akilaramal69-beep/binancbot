@@ -42,11 +42,24 @@ class MarketScanner:
                 
                 # Filter out exceptions and invalid results
                 candidates = []
+                debug_info = []
                 for r in results:
                     if isinstance(r, Exception):
                         logger.error(f"Analysis error: {r}")
-                    elif isinstance(r, dict) and r.get("should_trade"):
-                        candidates.append(r)
+                    elif isinstance(r, dict):
+                        reason = r.get("reason", "unknown")
+                        score = r.get("score", 0)
+                        trend = r.get("trend_strength", 0)
+                        should = r.get("should_trade", False)
+                        fib = r.get("fib_level_hit", "")
+                        bos = r.get("bos", False)
+                        vol = r.get("volume_spike", False)
+                        exp = r.get("explosive_move", False)
+                        debug_info.append(f"{r.get('symbol')}: score={score}, trend={trend:.2f}, fib={fib}, bos={bos}, vol={vol}, exp={exp}, should={should}, reason={reason}")
+                        if should:
+                            candidates.append(r)
+                
+                logger.info(f"Analysis: {' | '.join(debug_info)}")
                 
                 if candidates:
                     # Phase 2: Rank candidates (normalized)
